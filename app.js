@@ -10,7 +10,7 @@ const STATE = {
   searchAuthor: '',       // 搜书时的作者名（高级设置）
   bookData: null,
   bookContent: '',        // 搜书 Agent 返回的书籍内容（供拆书 Agent 使用）
-  chaishuConversationId: '', // 拆书 Agent 的会话 ID（支持多轮对话）
+  conversationHistory: [], // 拆书 Agent 的多轮对话历史（OpenAI messages 格式）
   levels: [],
   currentLevel: 0,
   completedLevels: new Set(),
@@ -735,16 +735,24 @@ function generateAIReply(text) {
       STATE.currentBook,
       STATE.bookContent,
       text,
-      STATE.chaishuConversationId,
+      STATE.conversationHistory,
       (chunk, fullText) => {
         textEl.textContent = fullText;
         const container = $('chat-messages');
         container.scrollTop = container.scrollHeight;
       }
     ).then(result => {
-      if (result) {
-        STATE.chaishuConversationId = result.conversationId;
-        textEl.textContent = result.text || '小元暂时没有回应，请稍后再试。';
+      if (result && result.text) {
+        // 更新多轮对话历史
+        STATE.conversationHistory.push({ role: 'user', content: text });
+        STATE.conversationHistory.push({ role: 'assistant', content: result.text });
+        // 只保留最近 20 条（10 轮）
+        if (STATE.conversationHistory.length > 20) {
+          STATE.conversationHistory = STATE.conversationHistory.slice(-20);
+        }
+        textEl.textContent = result.text;
+      } else {
+        textEl.textContent = '小元暂时没有回应，请稍后再试。';
       }
     }).catch(e => {
       textEl.textContent = `⚠️ 小元连接出错：${e.message}`;
@@ -916,24 +924,40 @@ function escapeHtml(text) {
   return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-// ===== Knot Agent 配置管理（搜书Agent / 拆书Agent）=====
+// ===== 大模型 API 配置管理（腾讯云 Coding Plan）=====
 const OpenClawConfig = {
   STORAGE_KEY: 'xiaoyuan_openclaw_config',
   BOOK_CACHE_KEY: 'xiaoyuan_book_cache',
+
+  // 搜书 Agent 默认系统提示词
+  DEFAULT_SEARCH_SYSTEM: `你是一个专业的书籍内容助手。当用户给出书名（和可选的作者名）时，请详细介绍该书的：
+1. 核心主题与论点（3-5个）
+2. 章节结构概览
+3. 每章的核心观点（简洁）
+4. 作者的写作背景与意图
+5. 这本书对当下（2026年）的现实意义
+请用清晰的中文输出，结构化呈现。`,
+
+  // 拆书 Agent 默认系统提示词
+  DEFAULT_CHAISHU_SYSTEM: `你是"小元"，一个专业的拆书导师和知识向导。你的使命是帮助读者深度理解书籍，把晦涩的知识转化为大白话，并结合2026年的现实打补丁。
+你的风格：
+- 亲切、幽默，善用生活化比喻
+- 自称"小元"
+- 善于苏格拉底式提问，引导读者主动思考
+- 对作者观点既尊重又敢于批判
+- 结合2026年最新现实给出"时代补丁"
+当用户说"懂了"、"继续"、"下一关"时，表示他们已掌握当前内容，可以进入下一关。`,
 
   defaults() {
     return {
       enabled: false,
       fallback: true,
       timeout: 60,
-      proxyUrl: '',  // Cloudflare Worker 代理地址，留空则直连（需在同网络下）
-      knotToken: 'f5fc5416a15c428aa18a7def98772421', // 共用 Knot Token
-      agentB: {
-        url: 'http://knot.woa.com/apigw/api/v1/agents/agui/b60f24fea1e24830a1d6a4e550390dfc',
-      },
-      agentC: {
-        url: 'http://knot.woa.com/apigw/api/v1/agents/agui/6c06c662e064496d9602f7a88454800f',
-      },
+      apiKey: '',
+      baseUrl: 'https://api.lkeap.cloud.tencent.com/coding/v3',
+      model: 'hunyuan-2.0-instruct',
+      agentBSystem: '',  // 留空则使用 DEFAULT_SEARCH_SYSTEM
+      agentCSystem: '',  // 留空则使用 DEFAULT_CHAISHU_SYSTEM
     };
   },
 
@@ -943,15 +967,7 @@ const OpenClawConfig = {
       const defaults = this.defaults();
       if (!raw) return defaults;
       const saved = JSON.parse(raw);
-      // 兼容旧格式：agentB.key / agentC.key → knotToken
-      const knotToken = saved.knotToken || saved.agentB?.key || saved.agentC?.key || defaults.knotToken;
-      return {
-        ...defaults,
-        ...saved,
-        knotToken,
-        agentB: { ...defaults.agentB, ...saved.agentB },
-        agentC: { ...defaults.agentC, ...saved.agentC },
-      };
+      return { ...defaults, ...saved };
     } catch(e) { return this.defaults(); }
   },
 
@@ -966,7 +982,7 @@ const OpenClawConfig = {
 
   isConfigured() {
     const cfg = this.load();
-    return cfg.enabled && cfg.knotToken && cfg.agentB.url && cfg.agentC.url;
+    return cfg.enabled && cfg.apiKey && cfg.baseUrl;
   },
 
   // 缓存书籍检索结果（供拆书 Agent 使用）
@@ -990,52 +1006,31 @@ const OpenClawConfig = {
     const cache = this.loadBookCache();
     const key = `${bookName}${author ? '|' + author : ''}`;
     const item = cache[key];
-    // 缓存有效期 24 小时
     if (item && (Date.now() - item.cachedAt) < 24 * 3600 * 1000) return item;
     return null;
   },
 
-  // ===== 调用 Knot AG-UI SSE 协议 =====
-  async callKnotAgent(endpoint, token, message, onChunk, timeoutSec = 60) {
+  // ===== 核心：调用 OpenAI 兼容接口（流式）=====
+  async callLLM(messages, onChunk, timeoutSec = 60) {
     const cfg = this.load();
-    const proxyUrl = cfg.proxyUrl?.trim();
-    // 优先使用传入的 token，否则使用全局 knotToken
-    const actualToken = token || cfg.knotToken;
-
-    // 决定实际请求地址和 headers
-    let fetchUrl, fetchHeaders;
-    if (proxyUrl) {
-      // 通过代理（解决 CORS）
-      fetchUrl = proxyUrl.replace(/\/$/, '') + '/proxy';
-      fetchHeaders = {
-        'Content-Type': 'application/json',
-        'x-knot-api-token': actualToken,
-        'x-target-url': endpoint,
-      };
-    } else {
-      // 直连（需在同网络下，如企业内网）
-      fetchUrl = endpoint;
-      fetchHeaders = {
-        'Content-Type': 'application/json',
-        'x-knot-api-token': actualToken,
-      };
-    }
+    const url = `${cfg.baseUrl.replace(/\/$/, '')}/chat/completions`;
 
     const body = {
-      input: {
-        message,
-        conversation_id: '',
-        stream: true,
-      }
+      model: cfg.model,
+      messages,
+      stream: true,
     };
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutSec * 1000);
 
     try {
-      const resp = await fetch(fetchUrl, {
+      const resp = await fetch(url, {
         method: 'POST',
-        headers: fetchHeaders,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${cfg.apiKey}`,
+        },
         body: JSON.stringify(body),
         signal: controller.signal,
       });
@@ -1047,7 +1042,7 @@ const OpenClawConfig = {
         throw new Error(`HTTP ${resp.status}: ${errText}`);
       }
 
-      // 读取 SSE 流
+      // 读取 SSE 流（OpenAI 标准格式）
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let fullText = '';
@@ -1059,25 +1054,23 @@ const OpenClawConfig = {
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-        buffer = lines.pop(); // 保留未完成的行
+        buffer = lines.pop();
 
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed || trimmed === 'data: [DONE]') continue;
 
-          const dataStr = trimmed.startsWith('data:') ? trimmed.slice(5).trim() : trimmed;
+          const dataStr = trimmed.startsWith('data:') ? trimmed.slice(5).trim() : null;
           if (!dataStr) continue;
 
           try {
-            const msg = JSON.parse(dataStr);
-            if (msg.type === 'TEXT_MESSAGE_CONTENT' && msg.rawEvent?.content) {
-              fullText += msg.rawEvent.content;
-              if (onChunk) onChunk(msg.rawEvent.content, fullText);
+            const json = JSON.parse(dataStr);
+            const delta = json.choices?.[0]?.delta?.content;
+            if (delta) {
+              fullText += delta;
+              if (onChunk) onChunk(delta, fullText);
             }
-            if (msg.type === 'RunError') {
-              throw new Error(msg.rawEvent?.tip_option?.content || '运行错误');
-            }
-          } catch(parseErr) {
+          } catch(e) {
             // 忽略非 JSON 行
           }
         }
@@ -1094,20 +1087,20 @@ const OpenClawConfig = {
   // 调用搜书 Agent
   async callSearchAgent(bookName, author, onChunk) {
     const cfg = this.load();
-    if (!cfg.enabled || !cfg.agentB.url || !cfg.knotToken) return null;
+    if (!cfg.enabled || !cfg.apiKey) return null;
 
-    const query = author
-      ? `请搜索书籍《${bookName}》，作者：${author}。请返回该书的核心内容、章节结构和主要论点。`
-      : `请搜索书籍《${bookName}》，返回该书的核心内容、章节结构和主要论点。`;
+    const systemPrompt = cfg.agentBSystem || this.DEFAULT_SEARCH_SYSTEM;
+    const userMsg = author
+      ? `请介绍书籍《${bookName}》，作者：${author}`
+      : `请介绍书籍《${bookName}》`;
+
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMsg },
+    ];
 
     try {
-      const result = await this.callKnotAgent(
-        cfg.agentB.url,
-        cfg.knotToken,
-        query,
-        onChunk,
-        cfg.timeout
-      );
+      const result = await this.callLLM(messages, onChunk, cfg.timeout);
       if (result) {
         this.saveBookCache(bookName, author, result);
       }
@@ -1118,165 +1111,146 @@ const OpenClawConfig = {
     }
   },
 
-  // 调用拆书 Agent（流式，直接输出到对话框）
-  async callChaishuAgent(bookName, bookContent, userMessage, conversationId, onChunk) {
+  // 调用拆书 Agent（流式，维护多轮对话历史）
+  async callChaishuAgent(bookName, bookContent, userMessage, conversationHistory, onChunk) {
     const cfg = this.load();
-    if (!cfg.enabled || !cfg.agentC.url || !cfg.knotToken) return null;
+    if (!cfg.enabled || !cfg.apiKey) return null;
 
-    const context = bookContent
-      ? `【书籍背景】《${bookName}》\n${bookContent.substring(0, 2000)}\n\n【用户问题】${userMessage}`
-      : userMessage;
+    const systemPrompt = cfg.agentCSystem || this.DEFAULT_CHAISHU_SYSTEM;
 
-    const proxyUrl = cfg.proxyUrl?.trim();
-    let fetchUrl, fetchHeaders;
-    if (proxyUrl) {
-      fetchUrl = proxyUrl.replace(/\/$/, '') + '/proxy';
-      fetchHeaders = {
-        'Content-Type': 'application/json',
-        'x-knot-api-token': cfg.knotToken,
-        'x-target-url': cfg.agentC.url,
-      };
-    } else {
-      fetchUrl = cfg.agentC.url;
-      fetchHeaders = {
-        'Content-Type': 'application/json',
-        'x-knot-api-token': cfg.knotToken,
-      };
+    // 构建消息列表
+    const messages = [{ role: 'system', content: systemPrompt }];
+
+    // 如果有书籍内容，在第一条用户消息前插入上下文
+    if (bookContent && (!conversationHistory || conversationHistory.length === 0)) {
+      messages.push({
+        role: 'user',
+        content: `我正在阅读《${bookName}》。以下是这本书的内容概要：\n\n${bookContent.substring(0, 3000)}\n\n请记住这些内容，我们来开始拆书。`
+      });
+      messages.push({
+        role: 'assistant',
+        content: `好的！我是小元，很高兴和你一起拆解《${bookName}》。我已经了解了这本书的核心内容，随时可以开始！`
+      });
     }
 
-    const body = {
-      input: {
-        message: context,
-        conversation_id: conversationId || '',
-        stream: true,
-      }
-    };
+    // 加入历史对话
+    if (conversationHistory && conversationHistory.length > 0) {
+      messages.push(...conversationHistory);
+    }
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), cfg.timeout * 1000);
+    // 加入当前用户消息
+    messages.push({ role: 'user', content: userMessage });
 
     try {
-      const resp = await fetch(fetchUrl, {
-        method: 'POST',
-        headers: fetchHeaders,
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timer);
-      if (!resp.ok) {
-        const errText = await resp.text().catch(() => '');
-        throw new Error(`HTTP ${resp.status}: ${errText}`);
-      }
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let fullText = '';
-      let buffer = '';
-      let newConversationId = conversationId || '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed === 'data: [DONE]') continue;
-
-          const dataStr = trimmed.startsWith('data:') ? trimmed.slice(5).trim() : trimmed;
-          if (!dataStr) continue;
-
-          try {
-            const msg = JSON.parse(dataStr);
-            if (msg.rawEvent?.conversation_id) {
-              newConversationId = msg.rawEvent.conversation_id;
-            }
-            if (msg.type === 'TEXT_MESSAGE_CONTENT' && msg.rawEvent?.content) {
-              fullText += msg.rawEvent.content;
-              if (onChunk) onChunk(msg.rawEvent.content, fullText);
-            }
-            if (msg.type === 'RunError') {
-              throw new Error(msg.rawEvent?.tip_option?.content || '运行错误');
-            }
-          } catch(parseErr) {}
-        }
-      }
-
-      return { text: fullText, conversationId: newConversationId };
+      const result = await this.callLLM(messages, onChunk, cfg.timeout);
+      return { text: result };
     } catch(e) {
-      clearTimeout(timer);
-      if (e.name === 'AbortError') throw new Error('请求超时');
       throw e;
     }
   },
 
-  // 测试连接（发送一个简单 ping 消息）—— 从 localStorage 读取配置
-  async testConnection(agent) {
+  // 测试 API 连接
+  async testAPI() {
     const cfg = this.load();
-    const agentCfg = agent === 'B' ? cfg.agentB : cfg.agentC;
-    const agentName = agent === 'B' ? '搜书 Agent' : '拆书 Agent（小元）';
+    if (!cfg.apiKey) return { ok: false, msg: '请先填写 API Key' };
+    if (!cfg.baseUrl) return { ok: false, msg: '请先填写 Base URL' };
 
-    if (!agentCfg.url) return { ok: false, msg: '请先填写 API 端点' };
-    if (!cfg.knotToken) return { ok: false, msg: '请先填写 Knot Token' };
+    const messages = [
+      { role: 'user', content: '请回复"连接成功"这四个字。' }
+    ];
 
     try {
-      const result = await this.callKnotAgent(
-        agentCfg.url,
-        cfg.knotToken,
-        '你好，请回复"连接成功"',
-        null,
-        15
-      );
-      if (result) return { ok: true, msg: `✅ ${agentName} 连接成功！回复：${result.substring(0, 30)}...` };
-      return { ok: false, msg: `❌ ${agentName} 无响应` };
+      const result = await this.callLLM(messages, null, 15);
+      if (result) return { ok: true, msg: `✅ API 连接成功！模型回复：${result.substring(0, 40)}` };
+      return { ok: false, msg: '❌ API 无响应' };
     } catch(e) {
       return { ok: false, msg: `❌ ${e.message}` };
     }
   },
 
-  // 测试连接 —— 先把表单当前值合并保存，再执行测试
-  // 这样无论用户是否点过"保存配置"，测试按钮都能正确读到最新填写的值
-  async testConnectionFromForm(agent) {
+  // 从表单读取并测试（不覆盖已保存配置）
+  async testAPIFromForm() {
     const saved = this.load();
-
-    // 从表单读取，若表单为空则保留 localStorage 中已有的值
-    const formToken = (document.getElementById('knot-token')?.value || '').trim();
-    const formUrlB  = (document.getElementById('agent-b-url')?.value || '').trim();
-    const formUrlC  = (document.getElementById('agent-c-url')?.value || '').trim();
-    const formProxy = (document.getElementById('openclaw-proxy')?.value || '').trim();
+    const formKey     = (document.getElementById('llm-api-key')?.value || '').trim();
+    const formBaseUrl = (document.getElementById('llm-base-url')?.value || '').trim();
+    const formModel   = document.getElementById('llm-model')?.value || '';
 
     const mergedCfg = {
       ...saved,
-      knotToken: formToken || saved.knotToken || '',
-      proxyUrl:  formProxy || saved.proxyUrl  || '',
-      agentB: { ...saved.agentB, url: formUrlB || saved.agentB?.url || '' },
-      agentC: { ...saved.agentC, url: formUrlC || saved.agentC?.url || '' },
+      apiKey:  formKey     || saved.apiKey  || '',
+      baseUrl: formBaseUrl || saved.baseUrl || this.defaults().baseUrl,
+      model:   formModel   || saved.model   || this.defaults().model,
     };
-
-    // 写回 localStorage，确保 callKnotAgent 读到最新值
     this.save(mergedCfg);
 
-    const agentUrl  = agent === 'B' ? mergedCfg.agentB.url : mergedCfg.agentC.url;
-    const agentName = agent === 'B' ? '搜书 Agent' : '拆书 Agent（小元）';
+    if (!mergedCfg.apiKey)  return { ok: false, msg: '请先填写 API Key' };
+    if (!mergedCfg.baseUrl) return { ok: false, msg: '请先填写 Base URL' };
 
-    if (!agentUrl)          return { ok: false, msg: '请先填写 API 端点' };
-    if (!mergedCfg.knotToken) return { ok: false, msg: '请先填写 Knot Token' };
+    const url = `${mergedCfg.baseUrl.replace(/\/$/, '')}/chat/completions`;
+    const body = {
+      model: mergedCfg.model,
+      messages: [{ role: 'user', content: '请回复"连接成功"这四个字。' }],
+      stream: true,
+    };
 
     try {
-      const result = await this.callKnotAgent(agentUrl, mergedCfg.knotToken, '你好，请回复"连接成功"', null, 15);
-      if (result) return { ok: true, msg: `✅ ${agentName} 连接成功！回复：${result.substring(0, 50)}` };
-      return { ok: false, msg: `❌ ${agentName} 无响应` };
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 15000);
+
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${mergedCfg.apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => '');
+        return { ok: false, msg: `❌ HTTP ${resp.status}: ${errText.substring(0, 100)}` };
+      }
+
+      // 读取第一段响应
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let preview = '';
+      let buffer = '';
+
+      outer: while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed === 'data: [DONE]') continue;
+          const dataStr = trimmed.startsWith('data:') ? trimmed.slice(5).trim() : null;
+          if (!dataStr) continue;
+          try {
+            const json = JSON.parse(dataStr);
+            const delta = json.choices?.[0]?.delta?.content;
+            if (delta) {
+              preview += delta;
+              if (preview.length >= 10) break outer;
+            }
+          } catch(e) {}
+        }
+      }
+      reader.cancel();
+
+      if (preview) return { ok: true, msg: `✅ API 连接成功！模型（${mergedCfg.model}）回复：${preview}` };
+      return { ok: false, msg: '❌ API 无响应' };
     } catch(e) {
+      if (e.name === 'AbortError') return { ok: false, msg: '❌ 连接超时（15s）' };
       return { ok: false, msg: `❌ ${e.message}` };
     }
   }
 };
 
-// ===== Agent 配置弹窗 UI =====
+// ===== 大模型 API 配置弹窗 UI =====
 function initOpenClawModal() {
   const modal = $('openclaw-modal');
   if (!modal) return;
@@ -1290,25 +1264,12 @@ function initOpenClawModal() {
   $('openclaw-modal-close').addEventListener('click', () => { modal.style.display = 'none'; });
   modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
 
-  // 测试搜书 Agent
-  $('test-agent-b').addEventListener('click', async () => {
-    const resultEl = $('test-b-result');
+  // 测试 API 连接
+  $('test-llm-api').addEventListener('click', async () => {
+    const resultEl = $('test-llm-result');
     resultEl.className = 'test-result loading';
-    resultEl.textContent = '⏳ 正在测试搜书 Agent 连接...';
-    // 直接从表单读取当前值进行测试，不覆盖已保存配置
-    const res = await OpenClawConfig.testConnectionFromForm('B');
-    resultEl.className = `test-result ${res.ok ? 'success' : 'error'}`;
-    resultEl.textContent = res.msg;
-    updateStatusBar();
-  });
-
-  // 测试拆书 Agent
-  $('test-agent-c').addEventListener('click', async () => {
-    const resultEl = $('test-c-result');
-    resultEl.className = 'test-result loading';
-    resultEl.textContent = '⏳ 正在测试拆书 Agent（小元）连接...';
-    // 直接从表单读取当前值进行测试，不覆盖已保存配置
-    const res = await OpenClawConfig.testConnectionFromForm('C');
+    resultEl.textContent = '⏳ 正在测试大模型 API 连接...';
+    const res = await OpenClawConfig.testAPIFromForm();
     resultEl.className = `test-result ${res.ok ? 'success' : 'error'}`;
     resultEl.textContent = res.msg;
     updateStatusBar();
@@ -1321,7 +1282,7 @@ function initOpenClawModal() {
     updateLandingSettingsBadge();
     const cfg = OpenClawConfig.load();
     if (cfg.enabled) {
-      appendSystemMsgIfInMain('✅ Agent 配置已保存！搜书 Agent 和拆书 Agent（小元）均已接入。');
+      appendSystemMsgIfInMain('✅ 大模型 API 配置已保存！搜书 Agent 和拆书 Agent（小元）均已接入。');
     }
   });
 
@@ -1343,28 +1304,26 @@ function openOpenClawModal() {
 }
 
 function loadConfigToForm(cfg) {
-  if ($('knot-token')) $('knot-token').value = cfg.knotToken || '';
-  if ($('agent-b-url')) $('agent-b-url').value = cfg.agentB?.url || '';
-  if ($('agent-c-url')) $('agent-c-url').value = cfg.agentC?.url || '';
-  if ($('openclaw-enabled')) $('openclaw-enabled').checked = cfg.enabled || false;
-  if ($('openclaw-fallback')) $('openclaw-fallback').checked = cfg.fallback !== false;
-  if ($('openclaw-proxy')) $('openclaw-proxy').value = cfg.proxyUrl || '';
-  if ($('openclaw-timeout')) $('openclaw-timeout').value = cfg.timeout || 60;
+  if ($('llm-api-key'))   $('llm-api-key').value   = cfg.apiKey  || '';
+  if ($('llm-base-url'))  $('llm-base-url').value  = cfg.baseUrl || OpenClawConfig.defaults().baseUrl;
+  if ($('llm-model'))     $('llm-model').value      = cfg.model   || OpenClawConfig.defaults().model;
+  if ($('agent-b-system')) $('agent-b-system').value = cfg.agentBSystem || '';
+  if ($('agent-c-system')) $('agent-c-system').value = cfg.agentCSystem || '';
+  if ($('openclaw-enabled'))  $('openclaw-enabled').checked  = cfg.enabled  || false;
+  if ($('openclaw-fallback'))  $('openclaw-fallback').checked = cfg.fallback !== false;
+  if ($('openclaw-timeout'))  $('openclaw-timeout').value    = cfg.timeout  || 60;
 }
 
 function saveFormToConfig() {
   const cfg = {
-    enabled: $('openclaw-enabled')?.checked || false,
-    fallback: $('openclaw-fallback')?.checked !== false,
-    proxyUrl: $('openclaw-proxy')?.value.trim() || '',
-    timeout: parseInt($('openclaw-timeout')?.value) || 60,
-    knotToken: $('knot-token')?.value.trim() || '',
-    agentB: {
-      url: $('agent-b-url')?.value.trim() || '',
-    },
-    agentC: {
-      url: $('agent-c-url')?.value.trim() || '',
-    },
+    enabled:      $('openclaw-enabled')?.checked || false,
+    fallback:     $('openclaw-fallback')?.checked !== false,
+    timeout:      parseInt($('openclaw-timeout')?.value) || 60,
+    apiKey:       $('llm-api-key')?.value.trim()    || '',
+    baseUrl:      $('llm-base-url')?.value.trim()   || OpenClawConfig.defaults().baseUrl,
+    model:        $('llm-model')?.value             || OpenClawConfig.defaults().model,
+    agentBSystem: $('agent-b-system')?.value.trim() || '',
+    agentCSystem: $('agent-c-system')?.value.trim() || '',
   };
   OpenClawConfig.save(cfg);
   return cfg;
@@ -1377,12 +1336,14 @@ function updateStatusBar() {
   const bLabel = $('status-b-label');
   const cLabel = $('status-c-label');
 
+  const isReady = cfg.enabled && cfg.apiKey;
+
   if (bDot && bLabel) {
     if (!cfg.enabled) {
       bDot.className = 'status-dot dot-idle';
       bLabel.textContent = '未启用';
       bLabel.className = 'status-label';
-    } else if (cfg.agentB.url) {
+    } else if (isReady) {
       bDot.className = 'status-dot dot-ok';
       bLabel.textContent = '已配置';
       bLabel.className = 'status-label ok';
@@ -1397,7 +1358,7 @@ function updateStatusBar() {
       cDot.className = 'status-dot dot-idle';
       cLabel.textContent = '未启用';
       cLabel.className = 'status-label';
-    } else if (cfg.agentC.url) {
+    } else if (isReady) {
       cDot.className = 'status-dot dot-ok';
       cLabel.textContent = '已配置';
       cLabel.className = 'status-label ok';
@@ -1415,7 +1376,7 @@ function updateLandingSettingsBadge() {
   const cfg = OpenClawConfig.load();
   const existingBadge = btn.querySelector('.configured-badge');
   if (existingBadge) existingBadge.remove();
-  if (cfg.enabled && cfg.agentB.url && cfg.agentC.url) {
+  if (cfg.enabled && cfg.apiKey) {
     const badge = document.createElement('span');
     badge.className = 'configured-badge';
     badge.textContent = '✓ 已接入';
@@ -1482,7 +1443,7 @@ async function runAgentPipeline(bookName, cfg) {
 
   // 向拆书 Agent 发送初始化指令，获取关卡结构
   let agentBookData = null;
-  if (bookContent || cfg.agentC.url) {
+  if (bookContent || OpenClawConfig.isConfigured()) {
     const initPrompt = `你现在是"小元"，一个专业的拆书导师。请对《${bookName}》进行拆解，生成关卡大纲。
 要求：
 1. 将全书分为5-12个关卡，每关对应一个核心概念或章节
@@ -1494,7 +1455,7 @@ async function runAgentPipeline(bookName, cfg) {
       bookName,
       bookContent,
       initPrompt,
-      '',
+      [],  // 初始化时对话历史为空
       null
     );
 
@@ -1504,7 +1465,11 @@ async function runAgentPipeline(bookName, cfg) {
       const levelInitAction = actions.find(a => a.type === 'LEVEL_INIT');
       if (levelInitAction?.data?.levels) {
         agentBookData = levelInitAction.data;
-        STATE.chaishuConversationId = initResult.conversationId;
+        // 初始化对话历史
+        STATE.conversationHistory = [
+          { role: 'user', content: initPrompt },
+          { role: 'assistant', content: initResult.text },
+        ];
       }
     }
   }
@@ -1537,6 +1502,7 @@ async function runAgentPipeline(bookName, cfg) {
   STATE.orbs = [];
   STATE.messages = [];
   STATE.declaration = '';
+  if (!agentBookData) STATE.conversationHistory = [];
 
   showScreen('main-screen');
   initMainScreen(bookName, STATE.bookData, false);

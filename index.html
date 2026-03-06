@@ -208,7 +208,7 @@
 <div class="modal-overlay" id="openclaw-modal" style="display:none">
   <div class="modal-card openclaw-modal-card">
     <div class="modal-header">
-      <h3>⚙️ Agent 配置</h3>
+      <h3>⚙️ 大模型 API 配置</h3>
       <button class="modal-close" id="openclaw-modal-close">✕</button>
     </div>
     <div class="modal-body openclaw-modal-body">
@@ -229,61 +229,88 @@
 
       <!-- 说明 -->
       <div class="openclaw-tip">
-        💡 配置 Knot 平台的 Agent，实现真实书籍检索与 AI 拆书。两个 Agent 共用同一个 <strong>Knot Token</strong>，每个 Agent 只需填写 <strong>API 端点</strong> 即可。
+        💡 接入腾讯云 <strong>Coding Plan</strong> 大模型 API，实现真实 AI 拆书。填写 API Key 和 Base URL 即可，无需代理，公网直连。<a href="https://hunyuan.cloud.tencent.com/#/app/subscription" target="_blank" style="color:#a78bfa">前往购买 Coding Plan →</a>
       </div>
 
-      <!-- 全局 Token 配置 -->
+      <!-- API 密钥配置 -->
       <div class="openclaw-section">
         <div class="openclaw-section-title">
           <span class="section-icon">🔑</span>
           <div>
-            <div class="section-name">Knot Token（共用）</div>
-            <div class="section-desc">两个 Agent 共用同一个 Token，在 <a href="https://knot.woa.com/settings/token" target="_blank" style="color:#a78bfa">knot.woa.com/settings/token</a> 申请</div>
+            <div class="section-name">API Key</div>
+            <div class="section-desc">Coding Plan 专属 API Key，格式为 <code style="color:#a78bfa;background:#1e1b4b;padding:1px 5px;border-radius:3px">sk-sp-xxxx</code>，在 Coding Plan 页面获取</div>
           </div>
         </div>
         <div class="openclaw-fields">
           <div class="field-group">
-            <label class="field-label">x-knot-api-token</label>
-            <input type="password" class="field-input" id="knot-token" placeholder="例如：f5fc5416a15c428aa18a7def98772421" />
+            <label class="field-label">API Key</label>
+            <input type="password" class="field-input" id="llm-api-key" placeholder="sk-sp-xxxx" autocomplete="off" />
           </div>
         </div>
       </div>
 
-      <!-- 搜书 Agent 配置区 -->
+      <!-- 模型与接口配置 -->
+      <div class="openclaw-section">
+        <div class="openclaw-section-title">
+          <span class="section-icon">🤖</span>
+          <div>
+            <div class="section-name">模型配置</div>
+            <div class="section-desc">选择要使用的模型，两个 Agent 共用同一模型</div>
+          </div>
+        </div>
+        <div class="openclaw-fields">
+          <div class="field-group">
+            <label class="field-label">Base URL（OpenAI 兼容）</label>
+            <input type="text" class="field-input" id="llm-base-url" value="https://api.lkeap.cloud.tencent.com/coding/v3" placeholder="https://api.lkeap.cloud.tencent.com/coding/v3" />
+          </div>
+          <div class="field-group">
+            <label class="field-label">模型</label>
+            <select class="field-select" id="llm-model">
+              <option value="tc-code-latest">Auto（自动最优）</option>
+              <option value="hunyuan-2.0-instruct" selected>Tencent HY 2.0 Instruct（推荐）</option>
+              <option value="hunyuan-t1">Hunyuan-T1（深度思考）</option>
+              <option value="hunyuan-turbos">Hunyuan-TurboS（快速）</option>
+              <option value="kimi-k2.5">Kimi-K2.5</option>
+              <option value="glm-5">GLM-5</option>
+              <option value="minimax-m2.5">MiniMax-M2.5</option>
+            </select>
+          </div>
+          <button class="test-btn" id="test-llm-api">🔌 测试 API 连接</button>
+          <div class="test-result" id="test-llm-result"></div>
+        </div>
+      </div>
+
+      <!-- 搜书 Agent 配置 -->
       <div class="openclaw-section">
         <div class="openclaw-section-title">
           <span class="section-icon">🔍</span>
           <div>
-            <div class="section-name">搜书 Agent</div>
-            <div class="section-desc">用户输入书名后，由搜书 Agent 检索书籍信息，检索结果将存储供拆书 Agent 使用</div>
+            <div class="section-name">搜书 Agent 系统提示词（可选）</div>
+            <div class="section-desc">自定义搜书 Agent 的行为，留空则使用默认提示词</div>
           </div>
         </div>
         <div class="openclaw-fields">
           <div class="field-group">
-            <label class="field-label">API 端点</label>
-            <input type="text" class="field-input" id="agent-b-url" placeholder="http://knot.woa.com/apigw/api/v1/agents/agui/{agent_id}" />
+            <label class="field-label">系统提示词（System Prompt）</label>
+            <textarea class="field-input field-textarea" id="agent-b-system" rows="3" placeholder="留空使用默认提示词：你是一个专业的书籍检索助手..."></textarea>
           </div>
-          <button class="test-btn" id="test-agent-b">🔌 测试连接</button>
-          <div class="test-result" id="test-b-result"></div>
         </div>
       </div>
 
-      <!-- 拆书 Agent 配置区 -->
+      <!-- 拆书 Agent 配置 -->
       <div class="openclaw-section">
         <div class="openclaw-section-title">
           <span class="section-icon">🎓</span>
           <div>
-            <div class="section-name">拆书 Agent（自称：小元）</div>
-            <div class="section-desc">负责逻辑拆解、关卡生成、大白话转化和与读者互动。与读者对话时自称"小元"</div>
+            <div class="section-name">拆书 Agent 系统提示词（可选）</div>
+            <div class="section-desc">自定义小元的人格和拆书风格，留空则使用默认提示词</div>
           </div>
         </div>
         <div class="openclaw-fields">
           <div class="field-group">
-            <label class="field-label">API 端点</label>
-            <input type="text" class="field-input" id="agent-c-url" placeholder="http://knot.woa.com/apigw/api/v1/agents/agui/{agent_id}" />
+            <label class="field-label">系统提示词（System Prompt）</label>
+            <textarea class="field-input field-textarea" id="agent-c-system" rows="3" placeholder="留空使用默认提示词：你是小元，一个专业的拆书导师..."></textarea>
           </div>
-          <button class="test-btn" id="test-agent-c">🔌 测试连接</button>
-          <div class="test-result" id="test-c-result"></div>
         </div>
       </div>
 
@@ -293,28 +320,22 @@
           <span class="section-icon">🌐</span>
           <div>
             <div class="section-name">全局设置</div>
-            <div class="section-desc">控制 Agent 调用行为</div>
           </div>
         </div>
         <div class="openclaw-fields">
           <div class="field-group field-group-row">
-            <label class="field-label">启用 Agent 接入</label>
+            <label class="field-label">启用大模型 API</label>
             <label class="toggle-switch">
               <input type="checkbox" id="openclaw-enabled" />
               <span class="toggle-slider"></span>
             </label>
           </div>
           <div class="field-group field-group-row">
-            <label class="field-label">Agent 不可用时降级到内置演示数据</label>
+            <label class="field-label">API 不可用时降级到内置演示数据</label>
             <label class="toggle-switch">
               <input type="checkbox" id="openclaw-fallback" checked />
               <span class="toggle-slider"></span>
             </label>
-          </div>
-          <div class="field-group">
-            <label class="field-label">代理地址（解决 CORS）<span class="field-tip">⚠️ 从公网访问时必填</span></label>
-            <input type="text" class="field-input" id="openclaw-proxy" placeholder="https://your-worker.workers.dev（留空则直连内网）" />
-            <div class="field-hint">knot.woa.com 是内网地址，浏览器无法直接访问。需部署 Cloudflare Worker 代理并填入地址。<a href="https://github.com/XiaoyuanNO1/xiaoyuan-chaishu/blob/main/proxy/worker.js" target="_blank" class="field-link">查看 Worker 代码</a></div>
           </div>
           <div class="field-group">
             <label class="field-label">请求超时（秒）</label>
