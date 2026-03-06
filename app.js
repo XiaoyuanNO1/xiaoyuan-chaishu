@@ -1214,7 +1214,7 @@ const OpenClawConfig = {
     }
   },
 
-  // 测试连接（发送一个简单 ping 消息）
+  // 测试连接（发送一个简单 ping 消息）—— 从 localStorage 读取配置
   async testConnection(agent) {
     const cfg = this.load();
     const agentCfg = agent === 'B' ? cfg.agentB : cfg.agentC;
@@ -1232,6 +1232,43 @@ const OpenClawConfig = {
         15
       );
       if (result) return { ok: true, msg: `✅ ${agentName} 连接成功！回复：${result.substring(0, 30)}...` };
+      return { ok: false, msg: `❌ ${agentName} 无响应` };
+    } catch(e) {
+      return { ok: false, msg: `❌ ${e.message}` };
+    }
+  },
+
+  // 测试连接 —— 先把表单当前值合并保存，再执行测试
+  // 这样无论用户是否点过"保存配置"，测试按钮都能正确读到最新填写的值
+  async testConnectionFromForm(agent) {
+    const saved = this.load();
+
+    // 从表单读取，若表单为空则保留 localStorage 中已有的值
+    const formToken = (document.getElementById('knot-token')?.value || '').trim();
+    const formUrlB  = (document.getElementById('agent-b-url')?.value || '').trim();
+    const formUrlC  = (document.getElementById('agent-c-url')?.value || '').trim();
+    const formProxy = (document.getElementById('openclaw-proxy')?.value || '').trim();
+
+    const mergedCfg = {
+      ...saved,
+      knotToken: formToken || saved.knotToken || '',
+      proxyUrl:  formProxy || saved.proxyUrl  || '',
+      agentB: { ...saved.agentB, url: formUrlB || saved.agentB?.url || '' },
+      agentC: { ...saved.agentC, url: formUrlC || saved.agentC?.url || '' },
+    };
+
+    // 写回 localStorage，确保 callKnotAgent 读到最新值
+    this.save(mergedCfg);
+
+    const agentUrl  = agent === 'B' ? mergedCfg.agentB.url : mergedCfg.agentC.url;
+    const agentName = agent === 'B' ? '搜书 Agent' : '拆书 Agent（小元）';
+
+    if (!agentUrl)          return { ok: false, msg: '请先填写 API 端点' };
+    if (!mergedCfg.knotToken) return { ok: false, msg: '请先填写 Knot Token' };
+
+    try {
+      const result = await this.callKnotAgent(agentUrl, mergedCfg.knotToken, '你好，请回复"连接成功"', null, 15);
+      if (result) return { ok: true, msg: `✅ ${agentName} 连接成功！回复：${result.substring(0, 50)}` };
       return { ok: false, msg: `❌ ${agentName} 无响应` };
     } catch(e) {
       return { ok: false, msg: `❌ ${e.message}` };
@@ -1255,11 +1292,11 @@ function initOpenClawModal() {
 
   // 测试搜书 Agent
   $('test-agent-b').addEventListener('click', async () => {
-    saveFormToConfig();
     const resultEl = $('test-b-result');
     resultEl.className = 'test-result loading';
     resultEl.textContent = '⏳ 正在测试搜书 Agent 连接...';
-    const res = await OpenClawConfig.testConnection('B');
+    // 直接从表单读取当前值进行测试，不覆盖已保存配置
+    const res = await OpenClawConfig.testConnectionFromForm('B');
     resultEl.className = `test-result ${res.ok ? 'success' : 'error'}`;
     resultEl.textContent = res.msg;
     updateStatusBar();
@@ -1267,11 +1304,11 @@ function initOpenClawModal() {
 
   // 测试拆书 Agent
   $('test-agent-c').addEventListener('click', async () => {
-    saveFormToConfig();
     const resultEl = $('test-c-result');
     resultEl.className = 'test-result loading';
     resultEl.textContent = '⏳ 正在测试拆书 Agent（小元）连接...';
-    const res = await OpenClawConfig.testConnection('C');
+    // 直接从表单读取当前值进行测试，不覆盖已保存配置
+    const res = await OpenClawConfig.testConnectionFromForm('C');
     resultEl.className = `test-result ${res.ok ? 'success' : 'error'}`;
     resultEl.textContent = res.msg;
     updateStatusBar();
