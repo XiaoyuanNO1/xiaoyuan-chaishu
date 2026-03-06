@@ -332,6 +332,8 @@ html, body { height: 100%; background: var(--bg-deep); color: var(--text-primary
   flex-direction: column;
   border-right: 1px solid var(--border);
   overflow: hidden;
+  min-height: 0;
+  min-width: 0;
 }
 
 .chat-messages {
@@ -1389,4 +1391,74 @@ html, body { height: 100%; background: var(--bg-deep); color: var(--text-primary
   .openclaw-modal-card { max-height: 92vh; }
   .openclaw-status-bar { flex-direction: column; gap: 8px; }
   .landing-settings-btn { top: 12px; right: 12px; padding: 6px 10px; font-size: 12px; }
+}
+
+/* ===== 高级搜索设置 ===== */
+.search-advanced {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-top: 10px;
+  margin-bottom: 4px;
+}
+.advanced-toggle {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 4px 0;
+  transition: color .2s;
+}
+.advanced-toggle:hover { color: var(--accent-blue); }
+.advanced-panel {
+  width: 100%;
+  margin-top: 8px;
+  padding: 12px 14px;
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  animation: slideIn .2s ease-out;
+}
+.advanced-field { display: flex; flex-direction: column; gap: 5px; }
+.advanced-label { font-size: 12px; color: var(--text-secondary); }
+.advanced-input {
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color .2s;
+  width: 100%;
+  box-sizing: border-box;
+}
+.advanced-input:focus { border-color: var(--accent-blue); }
+.advanced-input::placeholder { color: var(--text-muted); }
+
+/* ===== OpenClaw Tip ===== */
+.openclaw-tip {
+  background: #1e3a5f20;
+  border: 1px solid #1e3a5f60;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.openclaw-tip strong { color: var(--accent-blue); }
+
+/* ===== 流式输出光标 ===== */
+.typing-cursor {
+  display: inline-block;
+  animation: blink 0.8s step-end infinite;
+  color: var(--accent-blue);
+  font-weight: bold;
+}
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
 }

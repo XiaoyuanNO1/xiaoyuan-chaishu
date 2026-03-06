@@ -7,7 +7,10 @@
 // ===== 全局状态 =====
 const STATE = {
   currentBook: '',
+  searchAuthor: '',       // 搜书时的作者名（高级设置）
   bookData: null,
+  bookContent: '',        // 搜书 Agent 返回的书籍内容（供拆书 Agent 使用）
+  chaishuConversationId: '', // 拆书 Agent 的会话 ID（支持多轮对话）
   levels: [],
   currentLevel: 0,
   completedLevels: new Set(),
@@ -90,22 +93,34 @@ function initLanding() {
   const searchInput = $('book-search-input');
   const searchBtn = $('search-btn');
 
-  searchBtn.addEventListener('click', () => {
+  const doSearch = () => {
     const bookName = searchInput.value.trim();
-    if (bookName) startBookSession(bookName);
+    if (!bookName) return;
+    STATE.searchAuthor = $('book-author-input')?.value.trim() || '';
+    startBookSession(bookName);
+  };
+
+  searchBtn.addEventListener('click', doSearch);
+  searchInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') doSearch();
   });
 
-  searchInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter') {
-      const bookName = searchInput.value.trim();
-      if (bookName) startBookSession(bookName);
-    }
-  });
+  // 高级设置折叠
+  const advancedToggle = $('advanced-toggle');
+  const advancedPanel = $('advanced-panel');
+  if (advancedToggle && advancedPanel) {
+    advancedToggle.addEventListener('click', () => {
+      const isOpen = advancedPanel.style.display !== 'none';
+      advancedPanel.style.display = isOpen ? 'none' : 'block';
+      advancedToggle.textContent = isOpen ? '⚙️ 高级设置' : '⚙️ 收起设置';
+    });
+  }
 
   document.querySelectorAll('.quick-book-tag').forEach(btn => {
     btn.addEventListener('click', () => {
       const book = btn.dataset.book;
       searchInput.value = book;
+      STATE.searchAuthor = '';
       startBookSession(book);
     });
   });
@@ -700,6 +715,44 @@ function generateSummary() {
 function generateAIReply(text) {
   const levelId = STATE.currentLevel;
   const level = STATE.levels[levelId - 1];
+
+  // 优先调用拆书 Agent（小元）
+  if (OpenClawConfig.isConfigured()) {
+    const el = document.createElement('div');
+    el.className = 'msg-card ai-patch-card';
+    el.innerHTML = `
+      <div class="card-header">
+        <div class="card-avatar">⚡</div>
+        <span class="card-name">小元</span>
+        <span class="card-tag">[回复]</span>
+      </div>
+      <div class="card-body"><p class="card-main-text"><span class="typing-cursor">▋</span></p></div>
+    `;
+    appendMessage(el);
+    const textEl = el.querySelector('.card-main-text');
+
+    OpenClawConfig.callChaishuAgent(
+      STATE.currentBook,
+      STATE.bookContent,
+      text,
+      STATE.chaishuConversationId,
+      (chunk, fullText) => {
+        textEl.textContent = fullText;
+        const container = $('chat-messages');
+        container.scrollTop = container.scrollHeight;
+      }
+    ).then(result => {
+      if (result) {
+        STATE.chaishuConversationId = result.conversationId;
+        textEl.textContent = result.text || '小元暂时没有回应，请稍后再试。';
+      }
+    }).catch(e => {
+      textEl.textContent = `⚠️ 小元连接出错：${e.message}`;
+    });
+    return;
+  }
+
+  // 降级到内置回复
   const replies = [
     `关于你提到的「${text.substring(0, 20)}${text.length > 20 ? '...' : ''}」，这是个很好的思考点。在本关「${level?.name}」的语境下，核心是要建立一个系统性的认知框架——把抽象概念锚定到具体场景中。你还有什么疑问吗？`,
     `你的问题触及了本章的核心矛盾。作者在书中用了大量篇幅论证这一点，但 2026 年的现实是：理论进步比预期快，但社会接受度比预期慢。这种时间差，正是当下最大的机会窗口。`,
@@ -863,24 +916,40 @@ function escapeHtml(text) {
   return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-// ===== OpenClaw Agent 配置管理 =====
+// ===== Knot Agent 配置管理（搜书Agent / 拆书Agent）=====
 const OpenClawConfig = {
   STORAGE_KEY: 'xiaoyuan_openclaw_config',
+  BOOK_CACHE_KEY: 'xiaoyuan_book_cache',
 
   defaults() {
     return {
       enabled: false,
       fallback: true,
-      timeout: 30,
-      agentB: { url: '', id: '', key: '', mode: 'search' },
-      agentC: { url: '', id: '', key: '', style: 'socratic', granularity: 'chapter' },
+      timeout: 60,
+      agentB: {
+        url: 'http://knot.woa.com/apigw/api/v1/agents/agui/b60f24fea1e24830a1d6a4e550390dfc',
+        key: '',
+      },
+      agentC: {
+        url: 'http://knot.woa.com/apigw/api/v1/agents/agui/6c06c662e064496d9602f7a88454800f',
+        key: '',
+      },
     };
   },
 
   load() {
     try {
       const raw = localStorage.getItem(this.STORAGE_KEY);
-      return raw ? { ...this.defaults(), ...JSON.parse(raw) } : this.defaults();
+      const defaults = this.defaults();
+      if (!raw) return defaults;
+      const saved = JSON.parse(raw);
+      // 合并默认值（保留默认端点）
+      return {
+        ...defaults,
+        ...saved,
+        agentB: { ...defaults.agentB, ...saved.agentB },
+        agentC: { ...defaults.agentC, ...saved.agentC },
+      };
     } catch(e) { return this.defaults(); }
   },
 
@@ -890,149 +959,281 @@ const OpenClawConfig = {
 
   clear() {
     localStorage.removeItem(this.STORAGE_KEY);
+    localStorage.removeItem(this.BOOK_CACHE_KEY);
   },
 
   isConfigured() {
     const cfg = this.load();
-    return cfg.enabled && cfg.agentB.url && cfg.agentC.url;
+    return cfg.enabled && cfg.agentB.url && cfg.agentB.key && cfg.agentC.url && cfg.agentC.key;
   },
 
-  // 调用 Agent B 检索书籍
-  async callAgentB(bookName) {
-    const cfg = this.load();
-    if (!cfg.enabled || !cfg.agentB.url) return null;
+  // 缓存书籍检索结果（供拆书 Agent 使用）
+  saveBookCache(bookName, author, content) {
+    try {
+      const cache = this.loadBookCache();
+      const key = `${bookName}${author ? '|' + author : ''}`;
+      cache[key] = { bookName, author, content, cachedAt: Date.now() };
+      localStorage.setItem(this.BOOK_CACHE_KEY, JSON.stringify(cache));
+    } catch(e) {}
+  },
 
-    const endpoint = cfg.agentB.id
-      ? `${cfg.agentB.url.replace(/\/$/, '')}/${cfg.agentB.id}`
-      : cfg.agentB.url;
+  loadBookCache() {
+    try {
+      const raw = localStorage.getItem(this.BOOK_CACHE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch(e) { return {}; }
+  },
+
+  getBookCache(bookName, author) {
+    const cache = this.loadBookCache();
+    const key = `${bookName}${author ? '|' + author : ''}`;
+    const item = cache[key];
+    // 缓存有效期 24 小时
+    if (item && (Date.now() - item.cachedAt) < 24 * 3600 * 1000) return item;
+    return null;
+  },
+
+  // ===== 调用 Knot AG-UI SSE 协议 =====
+  async callKnotAgent(endpoint, token, message, onChunk, timeoutSec = 60) {
+    const body = {
+      input: {
+        message,
+        conversation_id: '',
+        stream: true,
+      }
+    };
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutSec * 1000);
 
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), (cfg.timeout || 30) * 1000);
-
       const resp = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(cfg.agentB.key ? { 'Authorization': `Bearer ${cfg.agentB.key}` } : {}),
+          'x-knot-api-token': token,
         },
-        body: JSON.stringify({ book: bookName, mode: cfg.agentB.mode }),
+        body: JSON.stringify(body),
         signal: controller.signal,
       });
+
       clearTimeout(timer);
 
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      return await resp.json();
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => '');
+        throw new Error(`HTTP ${resp.status}: ${errText}`);
+      }
+
+      // 读取 SSE 流
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // 保留未完成的行
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed === 'data: [DONE]') continue;
+
+          const dataStr = trimmed.startsWith('data:') ? trimmed.slice(5).trim() : trimmed;
+          if (!dataStr) continue;
+
+          try {
+            const msg = JSON.parse(dataStr);
+            if (msg.type === 'TEXT_MESSAGE_CONTENT' && msg.rawEvent?.content) {
+              fullText += msg.rawEvent.content;
+              if (onChunk) onChunk(msg.rawEvent.content, fullText);
+            }
+            if (msg.type === 'RunError') {
+              throw new Error(msg.rawEvent?.tip_option?.content || '运行错误');
+            }
+          } catch(parseErr) {
+            // 忽略非 JSON 行
+          }
+        }
+      }
+
+      return fullText;
     } catch(e) {
-      console.warn('[OpenClaw] Agent B 调用失败:', e.message);
+      clearTimeout(timer);
+      if (e.name === 'AbortError') throw new Error('请求超时');
+      throw e;
+    }
+  },
+
+  // 调用搜书 Agent
+  async callSearchAgent(bookName, author, onChunk) {
+    const cfg = this.load();
+    if (!cfg.enabled || !cfg.agentB.url || !cfg.agentB.key) return null;
+
+    const query = author
+      ? `请搜索书籍《${bookName}》，作者：${author}。请返回该书的核心内容、章节结构和主要论点。`
+      : `请搜索书籍《${bookName}》，返回该书的核心内容、章节结构和主要论点。`;
+
+    try {
+      const result = await this.callKnotAgent(
+        cfg.agentB.url,
+        cfg.agentB.key,
+        query,
+        onChunk,
+        cfg.timeout
+      );
+      if (result) {
+        this.saveBookCache(bookName, author, result);
+      }
+      return result;
+    } catch(e) {
+      console.warn('[搜书Agent] 调用失败:', e.message);
       return null;
     }
   },
 
-  // 调用 Agent C 拆书
-  async callAgentC(bookName, bookContent) {
+  // 调用拆书 Agent（流式，直接输出到对话框）
+  async callChaishuAgent(bookName, bookContent, userMessage, conversationId, onChunk) {
     const cfg = this.load();
-    if (!cfg.enabled || !cfg.agentC.url) return null;
+    if (!cfg.enabled || !cfg.agentC.url || !cfg.agentC.key) return null;
 
-    const endpoint = cfg.agentC.id
-      ? `${cfg.agentC.url.replace(/\/$/, '')}/${cfg.agentC.id}`
-      : cfg.agentC.url;
+    const context = bookContent
+      ? `【书籍背景】《${bookName}》\n${bookContent.substring(0, 2000)}\n\n【用户问题】${userMessage}`
+      : userMessage;
+
+    const body = {
+      input: {
+        message: context,
+        conversation_id: conversationId || '',
+        stream: true,
+      }
+    };
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), cfg.timeout * 1000);
 
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), (cfg.timeout || 30) * 1000);
-
-      const resp = await fetch(endpoint, {
+      const resp = await fetch(cfg.agentC.url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(cfg.agentC.key ? { 'Authorization': `Bearer ${cfg.agentC.key}` } : {}),
+          'x-knot-api-token': cfg.agentC.key,
         },
-        body: JSON.stringify({
-          book: bookName,
-          content: bookContent,
-          style: cfg.agentC.style,
-          granularity: cfg.agentC.granularity,
-        }),
+        body: JSON.stringify(body),
         signal: controller.signal,
       });
-      clearTimeout(timer);
 
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      return await resp.json();
+      clearTimeout(timer);
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => '');
+        throw new Error(`HTTP ${resp.status}: ${errText}`);
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
+      let buffer = '';
+      let newConversationId = conversationId || '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed === 'data: [DONE]') continue;
+
+          const dataStr = trimmed.startsWith('data:') ? trimmed.slice(5).trim() : trimmed;
+          if (!dataStr) continue;
+
+          try {
+            const msg = JSON.parse(dataStr);
+            if (msg.rawEvent?.conversation_id) {
+              newConversationId = msg.rawEvent.conversation_id;
+            }
+            if (msg.type === 'TEXT_MESSAGE_CONTENT' && msg.rawEvent?.content) {
+              fullText += msg.rawEvent.content;
+              if (onChunk) onChunk(msg.rawEvent.content, fullText);
+            }
+            if (msg.type === 'RunError') {
+              throw new Error(msg.rawEvent?.tip_option?.content || '运行错误');
+            }
+          } catch(parseErr) {}
+        }
+      }
+
+      return { text: fullText, conversationId: newConversationId };
     } catch(e) {
-      console.warn('[OpenClaw] Agent C 调用失败:', e.message);
-      return null;
+      clearTimeout(timer);
+      if (e.name === 'AbortError') throw new Error('请求超时');
+      throw e;
     }
   },
 
-  // 测试连接
+  // 测试连接（发送一个简单 ping 消息）
   async testConnection(agent) {
     const cfg = this.load();
     const agentCfg = agent === 'B' ? cfg.agentB : cfg.agentC;
-    if (!agentCfg.url) return { ok: false, msg: '请先填写服务地址' };
+    const agentName = agent === 'B' ? '搜书 Agent' : '拆书 Agent（小元）';
 
-    const endpoint = agentCfg.id
-      ? `${agentCfg.url.replace(/\/$/, '')}/${agentCfg.id}/ping`
-      : `${agentCfg.url.replace(/\/$/, '')}/ping`;
+    if (!agentCfg.url) return { ok: false, msg: '请先填写 API 端点' };
+    if (!agentCfg.key) return { ok: false, msg: '请先填写 Knot Token' };
 
     try {
-      const controller = new AbortController();
-      setTimeout(() => controller.abort(), 8000);
-
-      const resp = await fetch(endpoint, {
-        method: 'GET',
-        headers: agentCfg.key ? { 'Authorization': `Bearer ${agentCfg.key}` } : {},
-        signal: controller.signal,
-      });
-      if (resp.ok) return { ok: true, msg: `✅ 连接成功 (${resp.status})` };
-      return { ok: false, msg: `❌ HTTP ${resp.status}` };
+      const result = await this.callKnotAgent(
+        agentCfg.url,
+        agentCfg.key,
+        '你好，请回复"连接成功"',
+        null,
+        15
+      );
+      if (result) return { ok: true, msg: `✅ ${agentName} 连接成功！回复：${result.substring(0, 30)}...` };
+      return { ok: false, msg: `❌ ${agentName} 无响应` };
     } catch(e) {
-      if (e.name === 'AbortError') return { ok: false, msg: '❌ 连接超时（8s）' };
       return { ok: false, msg: `❌ ${e.message}` };
     }
   }
 };
 
-// ===== OpenClaw 配置弹窗 UI =====
+// ===== Agent 配置弹窗 UI =====
 function initOpenClawModal() {
   const modal = $('openclaw-modal');
   if (!modal) return;
 
-  // 打开弹窗（导航栏按钮）
   const settingsBtn = $('settings-btn');
   if (settingsBtn) settingsBtn.addEventListener('click', () => openOpenClawModal());
 
-  // 打开弹窗（启动页按钮）
   const landingBtn = $('landing-settings-btn');
   if (landingBtn) landingBtn.addEventListener('click', () => openOpenClawModal());
 
-  // 关闭弹窗
-  $('openclaw-modal-close').addEventListener('click', () => {
-    modal.style.display = 'none';
-  });
-  modal.addEventListener('click', e => {
-    if (e.target === modal) modal.style.display = 'none';
-  });
+  $('openclaw-modal-close').addEventListener('click', () => { modal.style.display = 'none'; });
+  modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
 
-  // 测试 Agent B
+  // 测试搜书 Agent
   $('test-agent-b').addEventListener('click', async () => {
     saveFormToConfig();
     const resultEl = $('test-b-result');
     resultEl.className = 'test-result loading';
-    resultEl.textContent = '⏳ 正在测试连接...';
+    resultEl.textContent = '⏳ 正在测试搜书 Agent 连接...';
     const res = await OpenClawConfig.testConnection('B');
     resultEl.className = `test-result ${res.ok ? 'success' : 'error'}`;
     resultEl.textContent = res.msg;
     updateStatusBar();
   });
 
-  // 测试 Agent C
+  // 测试拆书 Agent
   $('test-agent-c').addEventListener('click', async () => {
     saveFormToConfig();
     const resultEl = $('test-c-result');
     resultEl.className = 'test-result loading';
-    resultEl.textContent = '⏳ 正在测试连接...';
+    resultEl.textContent = '⏳ 正在测试拆书 Agent（小元）连接...';
     const res = await OpenClawConfig.testConnection('C');
     resultEl.className = `test-result ${res.ok ? 'success' : 'error'}`;
     resultEl.textContent = res.msg;
@@ -1044,12 +1245,15 @@ function initOpenClawModal() {
     saveFormToConfig();
     modal.style.display = 'none';
     updateLandingSettingsBadge();
-    appendSystemMsgIfInMain('⚙️ OpenClaw 配置已保存！下次拆书时将调用 Agent B/C。');
+    const cfg = OpenClawConfig.load();
+    if (cfg.enabled) {
+      appendSystemMsgIfInMain('✅ Agent 配置已保存！搜书 Agent 和拆书 Agent（小元）均已接入。');
+    }
   });
 
   // 清除配置
   $('openclaw-reset').addEventListener('click', () => {
-    if (!confirm('确定要清除所有 OpenClaw 配置吗？')) return;
+    if (!confirm('确定要清除配置吗？这将同时清除书籍缓存。')) return;
     OpenClawConfig.clear();
     loadConfigToForm(OpenClawConfig.defaults());
     updateStatusBar();
@@ -1065,37 +1269,27 @@ function openOpenClawModal() {
 }
 
 function loadConfigToForm(cfg) {
-  $('agent-b-url').value = cfg.agentB?.url || '';
-  $('agent-b-id').value = cfg.agentB?.id || '';
-  $('agent-b-key').value = cfg.agentB?.key || '';
-  $('agent-b-mode').value = cfg.agentB?.mode || 'search';
-  $('agent-c-url').value = cfg.agentC?.url || '';
-  $('agent-c-id').value = cfg.agentC?.id || '';
-  $('agent-c-key').value = cfg.agentC?.key || '';
-  $('agent-c-style').value = cfg.agentC?.style || 'socratic';
-  $('agent-c-granularity').value = cfg.agentC?.granularity || 'chapter';
-  $('openclaw-enabled').checked = cfg.enabled || false;
-  $('openclaw-fallback').checked = cfg.fallback !== false;
-  $('openclaw-timeout').value = cfg.timeout || 30;
+  if ($('agent-b-url')) $('agent-b-url').value = cfg.agentB?.url || '';
+  if ($('agent-b-key')) $('agent-b-key').value = cfg.agentB?.key || '';
+  if ($('agent-c-url')) $('agent-c-url').value = cfg.agentC?.url || '';
+  if ($('agent-c-key')) $('agent-c-key').value = cfg.agentC?.key || '';
+  if ($('openclaw-enabled')) $('openclaw-enabled').checked = cfg.enabled || false;
+  if ($('openclaw-fallback')) $('openclaw-fallback').checked = cfg.fallback !== false;
+  if ($('openclaw-timeout')) $('openclaw-timeout').value = cfg.timeout || 60;
 }
 
 function saveFormToConfig() {
   const cfg = {
-    enabled: $('openclaw-enabled').checked,
-    fallback: $('openclaw-fallback').checked,
-    timeout: parseInt($('openclaw-timeout').value) || 30,
+    enabled: $('openclaw-enabled')?.checked || false,
+    fallback: $('openclaw-fallback')?.checked !== false,
+    timeout: parseInt($('openclaw-timeout')?.value) || 60,
     agentB: {
-      url: $('agent-b-url').value.trim(),
-      id: $('agent-b-id').value.trim(),
-      key: $('agent-b-key').value.trim(),
-      mode: $('agent-b-mode').value,
+      url: $('agent-b-url')?.value.trim() || '',
+      key: $('agent-b-key')?.value.trim() || '',
     },
     agentC: {
-      url: $('agent-c-url').value.trim(),
-      id: $('agent-c-id').value.trim(),
-      key: $('agent-c-key').value.trim(),
-      style: $('agent-c-style').value,
-      granularity: $('agent-c-granularity').value,
+      url: $('agent-c-url')?.value.trim() || '',
+      key: $('agent-c-key')?.value.trim() || '',
     },
   };
   OpenClawConfig.save(cfg);
@@ -1184,48 +1378,82 @@ async function startBookSessionWithAgent(bookName) {
 
 async function runAgentPipeline(bookName, cfg) {
   const steps = ['step1', 'step2', 'step3', 'step4'];
-  const stepTexts = [
-    '📡 Agent B 检索书籍内容...',
-    '🤖 Agent C 逻辑拆解中...',
-    '🗺️ 关卡地图生成中...',
-    '⚡ 2026 实时补丁注入...',
-  ];
   const doneTexts = [
-    '✅ Agent B 检索完成',
-    '✅ Agent C 拆解完成',
+    '✅ 搜书 Agent 检索完成',
+    '✅ 拆书 Agent 拆解完成',
     '✅ 关卡地图已生成',
     '✅ 2026 实时补丁加载完成',
   ];
 
-  // Step 1: Agent B 检索
-  $(steps[0]).textContent = stepTexts[0];
+  // Step 1: 搜书 Agent 检索
+  $(steps[0]).textContent = '📡 搜书 Agent 检索书籍内容...';
   $(steps[0]).classList.add('active');
-  const bookContent = await OpenClawConfig.callAgentB(bookName);
-  await sleep(400);
+
+  const author = STATE.searchAuthor || '';
+  const cached = OpenClawConfig.getBookCache(bookName, author);
+  let bookContent = cached?.content || null;
+
+  if (!bookContent) {
+    bookContent = await OpenClawConfig.callSearchAgent(bookName, author, null);
+  }
+
+  await sleep(300);
   $(steps[0]).classList.remove('active');
   $(steps[0]).classList.add('done');
-  $(steps[0]).textContent = bookContent ? doneTexts[0] : '✅ 内置语料加载完成（Agent B 未响应）';
+  $(steps[0]).textContent = bookContent ? doneTexts[0] : '✅ 搜书完成（使用内置语料）';
 
-  // Step 2: Agent C 拆书
-  $(steps[1]).textContent = stepTexts[1];
+  // Step 2: 拆书 Agent 初始化
+  $(steps[1]).textContent = '🤖 拆书 Agent（小元）逻辑拆解中...';
   $(steps[1]).classList.add('active');
-  const agentBookData = bookContent ? await OpenClawConfig.callAgentC(bookName, bookContent) : null;
-  await sleep(400);
+
+  // 向拆书 Agent 发送初始化指令，获取关卡结构
+  let agentBookData = null;
+  if (bookContent || cfg.agentC.url) {
+    const initPrompt = `你现在是"小元"，一个专业的拆书导师。请对《${bookName}》进行拆解，生成关卡大纲。
+要求：
+1. 将全书分为5-12个关卡，每关对应一个核心概念或章节
+2. 以JSON格式返回，格式：[LEVEL_INIT: {"levels": [{"id":1,"name":"关卡名"},...],"levelContent":[{"authorText":"...","analogy":"...","aiPatch":"...","thinking":{"author":"...","ai":"...","userPrompt":"..."},"orbTitle":"...","orbContent":"...","orbTags":["..."]}]}]
+3. 黑话要转化为大白话，加入2026年的实时补丁视角
+4. 自我介绍时自称"小元"`;
+
+    const initResult = await OpenClawConfig.callChaishuAgent(
+      bookName,
+      bookContent,
+      initPrompt,
+      '',
+      null
+    );
+
+    if (initResult?.text) {
+      // 解析协议标签
+      const actions = ProtocolParser.parse(initResult.text);
+      const levelInitAction = actions.find(a => a.type === 'LEVEL_INIT');
+      if (levelInitAction?.data?.levels) {
+        agentBookData = levelInitAction.data;
+        STATE.chaishuConversationId = initResult.conversationId;
+      }
+    }
+  }
+
+  await sleep(300);
   $(steps[1]).classList.remove('active');
   $(steps[1]).classList.add('done');
-  $(steps[1]).textContent = agentBookData ? doneTexts[1] : '✅ 内置拆书数据加载完成（Agent C 未响应）';
+  $(steps[1]).textContent = agentBookData ? doneTexts[1] : '✅ 拆书完成（使用内置结构）';
 
-  // Step 3-4: 生成关卡地图和补丁
+  // Step 3-4
   for (let i = 2; i < steps.length; i++) {
     await sleep(400 + Math.random() * 200);
     $(steps[i]).classList.add('active');
-    await sleep(500);
+    await sleep(400);
     $(steps[i]).classList.remove('active');
     $(steps[i]).classList.add('done');
     $(steps[i]).textContent = doneTexts[i];
   }
 
   await sleep(300);
+
+  // 存储书籍内容供后续对话使用
+  STATE.bookContent = bookContent;
 
   // 优先使用 Agent 返回数据，否则降级到内置
   STATE.bookData = agentBookData || findBookData(bookName);
@@ -1240,9 +1468,9 @@ async function runAgentPipeline(bookName, cfg) {
   initMainScreen(bookName, STATE.bookData, false);
 
   if (agentBookData) {
-    appendSystemMsg(`🤖 OpenClaw Agent 已成功拆解《${bookName}》，共生成 ${STATE.levels.length} 关！`);
+    appendSystemMsg(`🤖 小元已完成《${bookName}》的拆解，共生成 ${STATE.levels.length} 关！`);
   } else if (cfg.fallback) {
-    appendSystemMsg(`⚠️ OpenClaw Agent 未响应，已降级到内置数据。共 ${STATE.levels.length} 关。`);
+    appendSystemMsg(`⚠️ Agent 未响应，已使用内置演示数据。共 ${STATE.levels.length} 关。`);
   }
 }
 

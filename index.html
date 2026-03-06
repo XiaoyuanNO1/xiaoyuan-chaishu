@@ -29,8 +29,18 @@
     <div class="search-area">
       <div class="search-box">
         <span class="search-icon">🔍</span>
-        <input type="text" id="book-search-input" placeholder="输入书名，例如：《数字世界生存指南》" autocomplete="off" />
+        <input type="text" id="book-search-input" placeholder="输入书名，例如：《人类简史》" autocomplete="off" />
         <button id="search-btn" class="search-btn">开始拆书</button>
+      </div>
+      <!-- 高级设置 -->
+      <div class="search-advanced">
+        <button class="advanced-toggle" id="advanced-toggle">⚙️ 高级设置</button>
+        <div class="advanced-panel" id="advanced-panel" style="display:none">
+          <div class="advanced-field">
+            <label class="advanced-label">作者（可选，用于精确匹配同名书籍）</label>
+            <input type="text" id="book-author-input" class="advanced-input" placeholder="例如：赫拉利" autocomplete="off" />
+          </div>
+        </div>
       </div>
       <div class="quick-books">
         <span class="quick-label">热门书目：</span>
@@ -198,7 +208,7 @@
 <div class="modal-overlay" id="openclaw-modal" style="display:none">
   <div class="modal-card openclaw-modal-card">
     <div class="modal-header">
-      <h3>⚙️ OpenClaw Agent 配置</h3>
+      <h3>⚙️ Agent 配置</h3>
       <button class="modal-close" id="openclaw-modal-close">✕</button>
     </div>
     <div class="modal-body openclaw-modal-body">
@@ -207,91 +217,63 @@
       <div class="openclaw-status-bar">
         <div class="status-item" id="status-agent-b">
           <span class="status-dot dot-idle"></span>
-          <span>Agent B（书籍检索）</span>
+          <span>搜书 Agent</span>
           <span class="status-label" id="status-b-label">未配置</span>
         </div>
         <div class="status-item" id="status-agent-c">
           <span class="status-dot dot-idle"></span>
-          <span>Agent C（拆书导师）</span>
+          <span>拆书 Agent（小元）</span>
           <span class="status-label" id="status-c-label">未配置</span>
         </div>
       </div>
 
-      <!-- Agent B 配置区 -->
+      <!-- 说明 -->
+      <div class="openclaw-tip">
+        💡 配置 Knot 平台的 Agent，实现真实书籍检索与 AI 拆书。每个 Agent 只需填写 <strong>API 端点</strong> 和 <strong>Token</strong> 即可。
+      </div>
+
+      <!-- 搜书 Agent 配置区 -->
       <div class="openclaw-section">
         <div class="openclaw-section-title">
           <span class="section-icon">🔍</span>
           <div>
-            <div class="section-name">Agent B · 书籍检索 Agent</div>
-            <div class="section-desc">负责在用户输入书名后，通过 OpenClaw 搜索引擎或语料库完成全书扫描与内容获取</div>
+            <div class="section-name">搜书 Agent</div>
+            <div class="section-desc">用户输入书名后，由搜书 Agent 检索书籍信息，检索结果将存储供拆书 Agent 使用</div>
           </div>
         </div>
         <div class="openclaw-fields">
           <div class="field-group">
-            <label class="field-label">OpenClaw 服务地址</label>
-            <input type="text" class="field-input" id="agent-b-url" placeholder="https://your-openclaw-instance.com/api" />
+            <label class="field-label">API 端点</label>
+            <input type="text" class="field-input" id="agent-b-url" placeholder="http://knot.woa.com/apigw/api/v1/agents/agui/{agent_id}" />
           </div>
           <div class="field-group">
-            <label class="field-label">Agent B ID / Endpoint</label>
-            <input type="text" class="field-input" id="agent-b-id" placeholder="agent-book-retrieval 或完整 endpoint URL" />
+            <label class="field-label">Knot Token（x-knot-api-token）</label>
+            <input type="password" class="field-input" id="agent-b-key" placeholder="在 knot.woa.com/settings/token 申请" />
           </div>
-          <div class="field-group">
-            <label class="field-label">API Key</label>
-            <input type="password" class="field-input" id="agent-b-key" placeholder="sk-..." />
-          </div>
-          <div class="field-group">
-            <label class="field-label">检索模式</label>
-            <select class="field-select" id="agent-b-mode">
-              <option value="search">搜索引擎模式（联网检索书籍内容）</option>
-              <option value="corpus">语料库模式（使用本地语料）</option>
-              <option value="hybrid">混合模式（优先语料，缺失则联网）</option>
-            </select>
-          </div>
-          <button class="test-btn" id="test-agent-b">🔌 测试 Agent B 连接</button>
+          <button class="test-btn" id="test-agent-b">🔌 测试连接</button>
           <div class="test-result" id="test-b-result"></div>
         </div>
       </div>
 
-      <!-- Agent C 配置区 -->
+      <!-- 拆书 Agent 配置区 -->
       <div class="openclaw-section">
         <div class="openclaw-section-title">
           <span class="section-icon">🎓</span>
           <div>
-            <div class="section-name">Agent C · 拆书导师 Agent</div>
-            <div class="section-desc">负责将书籍内容进行逻辑拆解、关卡生成、大白话转化和 2026 实时补丁注入</div>
+            <div class="section-name">拆书 Agent（自称：小元）</div>
+            <div class="section-desc">负责逻辑拆解、关卡生成、大白话转化和与读者互动。与读者对话时自称"小元"</div>
           </div>
         </div>
         <div class="openclaw-fields">
           <div class="field-group">
-            <label class="field-label">OpenClaw 服务地址</label>
-            <input type="text" class="field-input" id="agent-c-url" placeholder="https://your-openclaw-instance.com/api" />
+            <label class="field-label">API 端点</label>
+            <input type="text" class="field-input" id="agent-c-url" placeholder="http://knot.woa.com/apigw/api/v1/agents/agui/{agent_id}" />
           </div>
           <div class="field-group">
-            <label class="field-label">Agent C ID / Endpoint</label>
-            <input type="text" class="field-input" id="agent-c-id" placeholder="agent-book-tutor 或完整 endpoint URL" />
+            <label class="field-label">Knot Token（x-knot-api-token）</label>
+            <input type="password" class="field-input" id="agent-c-key" placeholder="在 knot.woa.com/settings/token 申请" />
           </div>
-          <div class="field-group">
-            <label class="field-label">API Key</label>
-            <input type="password" class="field-input" id="agent-c-key" placeholder="sk-..." />
-          </div>
-          <div class="field-group">
-            <label class="field-label">拆书风格</label>
-            <select class="field-select" id="agent-c-style">
-              <option value="socratic">苏格拉底式（引导提问）</option>
-              <option value="storytelling">故事叙述式（沉浸叙事）</option>
-              <option value="debate">辩论式（多方观点碰撞）</option>
-              <option value="feynman">费曼技巧（极度简化）</option>
-            </select>
-          </div>
-          <div class="field-group">
-            <label class="field-label">关卡粒度</label>
-            <select class="field-select" id="agent-c-granularity">
-              <option value="chapter">按章节（推荐，每章一关）</option>
-              <option value="section">按小节（精细模式，每节一关）</option>
-              <option value="concept">按概念（概念驱动，每个核心概念一关）</option>
-            </select>
-          </div>
-          <button class="test-btn" id="test-agent-c">🔌 测试 Agent C 连接</button>
+          <button class="test-btn" id="test-agent-c">🔌 测试连接</button>
           <div class="test-result" id="test-c-result"></div>
         </div>
       </div>
@@ -302,19 +284,19 @@
           <span class="section-icon">🌐</span>
           <div>
             <div class="section-name">全局设置</div>
-            <div class="section-desc">控制 Agent 调用行为和降级策略</div>
+            <div class="section-desc">控制 Agent 调用行为</div>
           </div>
         </div>
         <div class="openclaw-fields">
           <div class="field-group field-group-row">
-            <label class="field-label">启用 OpenClaw Agent</label>
+            <label class="field-label">启用 Agent 接入</label>
             <label class="toggle-switch">
               <input type="checkbox" id="openclaw-enabled" />
               <span class="toggle-slider"></span>
             </label>
           </div>
           <div class="field-group field-group-row">
-            <label class="field-label">降级到内置数据（Agent 不可用时）</label>
+            <label class="field-label">Agent 不可用时降级到内置演示数据</label>
             <label class="toggle-switch">
               <input type="checkbox" id="openclaw-fallback" checked />
               <span class="toggle-slider"></span>
@@ -322,7 +304,7 @@
           </div>
           <div class="field-group">
             <label class="field-label">请求超时（秒）</label>
-            <input type="number" class="field-input field-input-sm" id="openclaw-timeout" value="30" min="5" max="120" />
+            <input type="number" class="field-input field-input-sm" id="openclaw-timeout" value="60" min="10" max="300" />
           </div>
         </div>
       </div>
