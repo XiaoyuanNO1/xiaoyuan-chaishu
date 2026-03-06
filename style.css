@@ -1462,3 +1462,23 @@ html, body { height: 100%; background: var(--bg-deep); color: var(--text-primary
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
 }
+
+/* ===== 配置字段提示 ===== */
+.field-tip {
+  margin-left: 8px;
+  font-size: 11px;
+  color: #f59e0b;
+  font-weight: normal;
+}
+.field-hint {
+  margin-top: 5px;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.field-link {
+  color: var(--accent-blue);
+  text-decoration: none;
+  margin-left: 4px;
+}
+.field-link:hover { text-decoration: underline; }

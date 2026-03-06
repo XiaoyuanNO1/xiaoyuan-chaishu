@@ -303,6 +303,11 @@
             </label>
           </div>
           <div class="field-group">
+            <label class="field-label">代理地址（解决 CORS）<span class="field-tip">⚠️ 从公网访问时必填</span></label>
+            <input type="text" class="field-input" id="openclaw-proxy" placeholder="https://your-worker.workers.dev（留空则直连内网）" />
+            <div class="field-hint">knot.woa.com 是内网地址，浏览器无法直接访问。需部署 Cloudflare Worker 代理并填入地址。<a href="https://github.com/XiaoyuanNO1/xiaoyuan-chaishu/blob/main/proxy/worker.js" target="_blank" class="field-link">查看 Worker 代码</a></div>
+          </div>
+          <div class="field-group">
             <label class="field-label">请求超时（秒）</label>
             <input type="number" class="field-input field-input-sm" id="openclaw-timeout" value="60" min="10" max="300" />
           </div>

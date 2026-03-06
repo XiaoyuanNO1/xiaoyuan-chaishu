@@ -926,6 +926,7 @@ const OpenClawConfig = {
       enabled: false,
       fallback: true,
       timeout: 60,
+      proxyUrl: '',  // Cloudflare Worker 代理地址，留空则直连（需在同网络下）
       agentB: {
         url: 'http://knot.woa.com/apigw/api/v1/agents/agui/b60f24fea1e24830a1d6a4e550390dfc',
         key: '',
@@ -995,6 +996,28 @@ const OpenClawConfig = {
 
   // ===== 调用 Knot AG-UI SSE 协议 =====
   async callKnotAgent(endpoint, token, message, onChunk, timeoutSec = 60) {
+    const cfg = this.load();
+    const proxyUrl = cfg.proxyUrl?.trim();
+
+    // 决定实际请求地址和 headers
+    let fetchUrl, fetchHeaders;
+    if (proxyUrl) {
+      // 通过代理（解决 CORS）
+      fetchUrl = proxyUrl.replace(/\/$/, '') + '/proxy';
+      fetchHeaders = {
+        'Content-Type': 'application/json',
+        'x-knot-api-token': token,
+        'x-target-url': endpoint,
+      };
+    } else {
+      // 直连（需在同网络下，如企业内网）
+      fetchUrl = endpoint;
+      fetchHeaders = {
+        'Content-Type': 'application/json',
+        'x-knot-api-token': token,
+      };
+    }
+
     const body = {
       input: {
         message,
@@ -1007,12 +1030,9 @@ const OpenClawConfig = {
     const timer = setTimeout(() => controller.abort(), timeoutSec * 1000);
 
     try {
-      const resp = await fetch(endpoint, {
+      const resp = await fetch(fetchUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-knot-api-token': token,
-        },
+        headers: fetchHeaders,
         body: JSON.stringify(body),
         signal: controller.signal,
       });
@@ -1104,6 +1124,23 @@ const OpenClawConfig = {
       ? `【书籍背景】《${bookName}》\n${bookContent.substring(0, 2000)}\n\n【用户问题】${userMessage}`
       : userMessage;
 
+    const proxyUrl = cfg.proxyUrl?.trim();
+    let fetchUrl, fetchHeaders;
+    if (proxyUrl) {
+      fetchUrl = proxyUrl.replace(/\/$/, '') + '/proxy';
+      fetchHeaders = {
+        'Content-Type': 'application/json',
+        'x-knot-api-token': cfg.agentC.key,
+        'x-target-url': cfg.agentC.url,
+      };
+    } else {
+      fetchUrl = cfg.agentC.url;
+      fetchHeaders = {
+        'Content-Type': 'application/json',
+        'x-knot-api-token': cfg.agentC.key,
+      };
+    }
+
     const body = {
       input: {
         message: context,
@@ -1116,12 +1153,9 @@ const OpenClawConfig = {
     const timer = setTimeout(() => controller.abort(), cfg.timeout * 1000);
 
     try {
-      const resp = await fetch(cfg.agentC.url, {
+      const resp = await fetch(fetchUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-knot-api-token': cfg.agentC.key,
-        },
+        headers: fetchHeaders,
         body: JSON.stringify(body),
         signal: controller.signal,
       });
@@ -1275,6 +1309,7 @@ function loadConfigToForm(cfg) {
   if ($('agent-c-key')) $('agent-c-key').value = cfg.agentC?.key || '';
   if ($('openclaw-enabled')) $('openclaw-enabled').checked = cfg.enabled || false;
   if ($('openclaw-fallback')) $('openclaw-fallback').checked = cfg.fallback !== false;
+  if ($('openclaw-proxy')) $('openclaw-proxy').value = cfg.proxyUrl || '';
   if ($('openclaw-timeout')) $('openclaw-timeout').value = cfg.timeout || 60;
 }
 
@@ -1282,6 +1317,7 @@ function saveFormToConfig() {
   const cfg = {
     enabled: $('openclaw-enabled')?.checked || false,
     fallback: $('openclaw-fallback')?.checked !== false,
+    proxyUrl: $('openclaw-proxy')?.value.trim() || '',
     timeout: parseInt($('openclaw-timeout')?.value) || 60,
     agentB: {
       url: $('agent-b-url')?.value.trim() || '',
