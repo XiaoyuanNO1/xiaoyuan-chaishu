@@ -339,6 +339,7 @@ html, body { height: 100%; background: var(--bg-deep); color: var(--text-primary
 .chat-messages {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 24px 28px;
   display: flex;
   flex-direction: column;
@@ -912,8 +913,21 @@ html, body { height: 100%; background: var(--bg-deep); color: var(--text-primary
 }
 
 /* ===== 思维卡片增强 ===== */
+.thinking-card {
+  max-width: 100% !important;
+  width: 100%;
+  box-sizing: border-box;
+}
 .thinking-card .thinking-field {
   margin-top: 10px;
+}
+.thinking-row {
+  min-width: 0;
+}
+.thinking-col {
+  min-width: 0;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 /* ===== 全书通关庆祝 ===== */
