@@ -927,13 +927,12 @@ const OpenClawConfig = {
       fallback: true,
       timeout: 60,
       proxyUrl: '',  // Cloudflare Worker 代理地址，留空则直连（需在同网络下）
+      knotToken: 'f5fc5416a15c428aa18a7def98772421', // 共用 Knot Token
       agentB: {
         url: 'http://knot.woa.com/apigw/api/v1/agents/agui/b60f24fea1e24830a1d6a4e550390dfc',
-        key: '',
       },
       agentC: {
         url: 'http://knot.woa.com/apigw/api/v1/agents/agui/6c06c662e064496d9602f7a88454800f',
-        key: '',
       },
     };
   },
@@ -944,10 +943,12 @@ const OpenClawConfig = {
       const defaults = this.defaults();
       if (!raw) return defaults;
       const saved = JSON.parse(raw);
-      // 合并默认值（保留默认端点）
+      // 兼容旧格式：agentB.key / agentC.key → knotToken
+      const knotToken = saved.knotToken || saved.agentB?.key || saved.agentC?.key || defaults.knotToken;
       return {
         ...defaults,
         ...saved,
+        knotToken,
         agentB: { ...defaults.agentB, ...saved.agentB },
         agentC: { ...defaults.agentC, ...saved.agentC },
       };
@@ -965,7 +966,7 @@ const OpenClawConfig = {
 
   isConfigured() {
     const cfg = this.load();
-    return cfg.enabled && cfg.agentB.url && cfg.agentB.key && cfg.agentC.url && cfg.agentC.key;
+    return cfg.enabled && cfg.knotToken && cfg.agentB.url && cfg.agentC.url;
   },
 
   // 缓存书籍检索结果（供拆书 Agent 使用）
@@ -998,6 +999,8 @@ const OpenClawConfig = {
   async callKnotAgent(endpoint, token, message, onChunk, timeoutSec = 60) {
     const cfg = this.load();
     const proxyUrl = cfg.proxyUrl?.trim();
+    // 优先使用传入的 token，否则使用全局 knotToken
+    const actualToken = token || cfg.knotToken;
 
     // 决定实际请求地址和 headers
     let fetchUrl, fetchHeaders;
@@ -1006,7 +1009,7 @@ const OpenClawConfig = {
       fetchUrl = proxyUrl.replace(/\/$/, '') + '/proxy';
       fetchHeaders = {
         'Content-Type': 'application/json',
-        'x-knot-api-token': token,
+        'x-knot-api-token': actualToken,
         'x-target-url': endpoint,
       };
     } else {
@@ -1014,7 +1017,7 @@ const OpenClawConfig = {
       fetchUrl = endpoint;
       fetchHeaders = {
         'Content-Type': 'application/json',
-        'x-knot-api-token': token,
+        'x-knot-api-token': actualToken,
       };
     }
 
@@ -1091,7 +1094,7 @@ const OpenClawConfig = {
   // 调用搜书 Agent
   async callSearchAgent(bookName, author, onChunk) {
     const cfg = this.load();
-    if (!cfg.enabled || !cfg.agentB.url || !cfg.agentB.key) return null;
+    if (!cfg.enabled || !cfg.agentB.url || !cfg.knotToken) return null;
 
     const query = author
       ? `请搜索书籍《${bookName}》，作者：${author}。请返回该书的核心内容、章节结构和主要论点。`
@@ -1100,7 +1103,7 @@ const OpenClawConfig = {
     try {
       const result = await this.callKnotAgent(
         cfg.agentB.url,
-        cfg.agentB.key,
+        cfg.knotToken,
         query,
         onChunk,
         cfg.timeout
@@ -1118,7 +1121,7 @@ const OpenClawConfig = {
   // 调用拆书 Agent（流式，直接输出到对话框）
   async callChaishuAgent(bookName, bookContent, userMessage, conversationId, onChunk) {
     const cfg = this.load();
-    if (!cfg.enabled || !cfg.agentC.url || !cfg.agentC.key) return null;
+    if (!cfg.enabled || !cfg.agentC.url || !cfg.knotToken) return null;
 
     const context = bookContent
       ? `【书籍背景】《${bookName}》\n${bookContent.substring(0, 2000)}\n\n【用户问题】${userMessage}`
@@ -1130,14 +1133,14 @@ const OpenClawConfig = {
       fetchUrl = proxyUrl.replace(/\/$/, '') + '/proxy';
       fetchHeaders = {
         'Content-Type': 'application/json',
-        'x-knot-api-token': cfg.agentC.key,
+        'x-knot-api-token': cfg.knotToken,
         'x-target-url': cfg.agentC.url,
       };
     } else {
       fetchUrl = cfg.agentC.url;
       fetchHeaders = {
         'Content-Type': 'application/json',
-        'x-knot-api-token': cfg.agentC.key,
+        'x-knot-api-token': cfg.knotToken,
       };
     }
 
@@ -1218,12 +1221,12 @@ const OpenClawConfig = {
     const agentName = agent === 'B' ? '搜书 Agent' : '拆书 Agent（小元）';
 
     if (!agentCfg.url) return { ok: false, msg: '请先填写 API 端点' };
-    if (!agentCfg.key) return { ok: false, msg: '请先填写 Knot Token' };
+    if (!cfg.knotToken) return { ok: false, msg: '请先填写 Knot Token' };
 
     try {
       const result = await this.callKnotAgent(
         agentCfg.url,
-        agentCfg.key,
+        cfg.knotToken,
         '你好，请回复"连接成功"',
         null,
         15
@@ -1303,10 +1306,9 @@ function openOpenClawModal() {
 }
 
 function loadConfigToForm(cfg) {
+  if ($('knot-token')) $('knot-token').value = cfg.knotToken || '';
   if ($('agent-b-url')) $('agent-b-url').value = cfg.agentB?.url || '';
-  if ($('agent-b-key')) $('agent-b-key').value = cfg.agentB?.key || '';
   if ($('agent-c-url')) $('agent-c-url').value = cfg.agentC?.url || '';
-  if ($('agent-c-key')) $('agent-c-key').value = cfg.agentC?.key || '';
   if ($('openclaw-enabled')) $('openclaw-enabled').checked = cfg.enabled || false;
   if ($('openclaw-fallback')) $('openclaw-fallback').checked = cfg.fallback !== false;
   if ($('openclaw-proxy')) $('openclaw-proxy').value = cfg.proxyUrl || '';
@@ -1319,13 +1321,12 @@ function saveFormToConfig() {
     fallback: $('openclaw-fallback')?.checked !== false,
     proxyUrl: $('openclaw-proxy')?.value.trim() || '',
     timeout: parseInt($('openclaw-timeout')?.value) || 60,
+    knotToken: $('knot-token')?.value.trim() || '',
     agentB: {
       url: $('agent-b-url')?.value.trim() || '',
-      key: $('agent-b-key')?.value.trim() || '',
     },
     agentC: {
       url: $('agent-c-url')?.value.trim() || '',
-      key: $('agent-c-key')?.value.trim() || '',
     },
   };
   OpenClawConfig.save(cfg);

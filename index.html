@@ -229,7 +229,24 @@
 
       <!-- 说明 -->
       <div class="openclaw-tip">
-        💡 配置 Knot 平台的 Agent，实现真实书籍检索与 AI 拆书。每个 Agent 只需填写 <strong>API 端点</strong> 和 <strong>Token</strong> 即可。
+        💡 配置 Knot 平台的 Agent，实现真实书籍检索与 AI 拆书。两个 Agent 共用同一个 <strong>Knot Token</strong>，每个 Agent 只需填写 <strong>API 端点</strong> 即可。
+      </div>
+
+      <!-- 全局 Token 配置 -->
+      <div class="openclaw-section">
+        <div class="openclaw-section-title">
+          <span class="section-icon">🔑</span>
+          <div>
+            <div class="section-name">Knot Token（共用）</div>
+            <div class="section-desc">两个 Agent 共用同一个 Token，在 <a href="https://knot.woa.com/settings/token" target="_blank" style="color:#a78bfa">knot.woa.com/settings/token</a> 申请</div>
+          </div>
+        </div>
+        <div class="openclaw-fields">
+          <div class="field-group">
+            <label class="field-label">x-knot-api-token</label>
+            <input type="password" class="field-input" id="knot-token" placeholder="例如：f5fc5416a15c428aa18a7def98772421" />
+          </div>
+        </div>
       </div>
 
       <!-- 搜书 Agent 配置区 -->
@@ -245,10 +262,6 @@
           <div class="field-group">
             <label class="field-label">API 端点</label>
             <input type="text" class="field-input" id="agent-b-url" placeholder="http://knot.woa.com/apigw/api/v1/agents/agui/{agent_id}" />
-          </div>
-          <div class="field-group">
-            <label class="field-label">Knot Token（x-knot-api-token）</label>
-            <input type="password" class="field-input" id="agent-b-key" placeholder="在 knot.woa.com/settings/token 申请" />
           </div>
           <button class="test-btn" id="test-agent-b">🔌 测试连接</button>
           <div class="test-result" id="test-b-result"></div>
@@ -268,10 +281,6 @@
           <div class="field-group">
             <label class="field-label">API 端点</label>
             <input type="text" class="field-input" id="agent-c-url" placeholder="http://knot.woa.com/apigw/api/v1/agents/agui/{agent_id}" />
-          </div>
-          <div class="field-group">
-            <label class="field-label">Knot Token（x-knot-api-token）</label>
-            <input type="password" class="field-input" id="agent-c-key" placeholder="在 knot.woa.com/settings/token 申请" />
           </div>
           <button class="test-btn" id="test-agent-c">🔌 测试连接</button>
           <div class="test-result" id="test-c-result"></div>
