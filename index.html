@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>小元拆书 · 知识液化平台</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<!-- ===== 启动页 / 书籍搜索页 ===== -->
+<div id="landing-screen" class="screen active">
+  <div class="landing-bg">
+    <div class="floating-orb orb1"></div>
+    <div class="floating-orb orb2"></div>
+    <div class="floating-orb orb3"></div>
+  </div>
+  <!-- 右上角设置入口 -->
+  <button class="landing-settings-btn" id="landing-settings-btn" title="配置 OpenClaw Agent">⚙️ Agent 配置</button>
+  <div class="landing-content">
+    <div class="logo-area">
+      <div class="logo-icon">📖</div>
+      <h1 class="logo-title">小元拆书</h1>
+      <p class="logo-subtitle">知识液化 · 对话过关 · 结晶收藏</p>
+      <div class="year-badge">2026 · 实时实证版</div>
+    </div>
+    <div class="search-area">
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="book-search-input" placeholder="输入书名，例如：《数字世界生存指南》" autocomplete="off" />
+        <button id="search-btn" class="search-btn">开始拆书</button>
+      </div>
+      <div class="quick-books">
+        <span class="quick-label">热门书目：</span>
+        <button class="quick-book-tag" data-book="数字世界生存指南">数字世界生存指南</button>
+        <button class="quick-book-tag" data-book="人类简史">人类简史</button>
+        <button class="quick-book-tag" data-book="思考，快与慢">思考，快与慢</button>
+        <button class="quick-book-tag" data-book="原则">原则</button>
+      </div>
+    </div>
+    <div class="landing-features">
+      <div class="feature-card">
+        <span class="feature-icon">💬</span>
+        <span class="feature-text">黑话变大白话</span>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🎮</span>
+        <span class="feature-text">游戏化过关</span>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">💎</span>
+        <span class="feature-text">结晶知识收藏</span>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">⚡</span>
+        <span class="feature-text">2026 实时补丁</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 加载/初始化页 ===== -->
+<div id="loading-screen" class="screen">
+  <div class="loading-content">
+    <div class="loading-book">
+      <div class="book-pages">
+        <div class="page p1"></div>
+        <div class="page p2"></div>
+        <div class="page p3"></div>
+      </div>
+    </div>
+    <h2 id="loading-title">正在扫描全书...</h2>
+    <p id="loading-subtitle">Agent B 正在进行逻辑拆解，请稍候</p>
+    <div class="loading-steps">
+      <div class="step" id="step1">📚 全书语料扫描</div>
+      <div class="step" id="step2">🧩 逻辑结构拆解</div>
+      <div class="step" id="step3">🗺️ 关卡地图生成</div>
+      <div class="step" id="step4">⚡ 2026 实时补丁加载</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 主阅读界面 ===== -->
+<div id="main-screen" class="screen">
+
+  <!-- 顶部导航 -->
+  <header class="top-nav">
+    <div class="nav-left">
+      <button class="back-btn" id="back-to-landing">← 换书</button>
+      <div class="book-title-nav" id="nav-book-title">《数字世界生存指南》</div>
+    </div>
+    <div class="nav-center">
+      <div class="level-status-bar">
+        <span class="level-label">Level</span>
+        <span class="level-current" id="level-current">1</span>
+        <span class="level-sep">/</span>
+        <span class="level-total" id="level-total">12</span>
+        <div class="level-progress-wrap">
+          <div class="level-progress-fill" id="level-progress-fill" style="width: 8%"></div>
+        </div>
+      </div>
+    </div>
+    <div class="nav-right">
+      <div class="year-tag">2026</div>
+      <button class="mobile-sidebar-btn" id="mobile-sidebar-btn">🗺️ 地图</button>
+      <button class="orb-gallery-btn" id="orb-gallery-btn" title="结晶仓库">💎 <span id="orb-count">0</span></button>
+      <button class="settings-btn" id="settings-btn" title="OpenClaw 配置">⚙️</button>
+    </div>
+  </header>
+
+  <!-- 主体区域 -->
+  <div class="main-body">
+
+    <!-- 左侧：沉浸对话舱 (75%) -->
+    <div class="chat-cabin" id="chat-cabin">
+
+      <!-- 对话消息流 -->
+      <div class="chat-messages" id="chat-messages">
+        <!-- 消息动态插入 -->
+      </div>
+
+      <!-- 底部交互区 -->
+      <div class="chat-input-area">
+        <div class="quick-actions">
+          <button class="quick-btn next-btn" id="quick-next">🚀 快捷过关</button>
+          <button class="quick-btn example-btn" id="quick-example">💡 求举例</button>
+          <button class="quick-btn argue-btn" id="quick-argue">⚔️ 我要杠一下</button>
+          <button class="quick-btn summary-btn" id="quick-summary">📌 总结一下</button>
+        </div>
+        <div class="input-row">
+          <textarea id="user-input" placeholder="输入你的想法，或直接点击上方快捷按钮..." rows="2"></textarea>
+          <button class="send-btn" id="send-btn">发送</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右侧：逻辑资产边栏 (25%) -->
+    <aside class="asset-sidebar" id="asset-sidebar">
+
+      <!-- 垂直关卡地图 -->
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">
+          <span>🗺️ 关卡地图</span>
+          <span class="sidebar-badge" id="completed-count">0/12</span>
+        </div>
+        <div class="level-map" id="level-map">
+          <!-- 关卡动态插入 -->
+        </div>
+      </div>
+
+      <!-- 结晶仓库 -->
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">
+          <span>💎 结晶仓库</span>
+          <span class="sidebar-badge" id="orb-gallery-count">0</span>
+        </div>
+        <div class="orb-gallery" id="orb-gallery">
+          <div class="orb-empty">通关章节后，知识结晶将在这里闪耀✨</div>
+        </div>
+      </div>
+
+      <!-- 用户生存宣言 -->
+      <div class="sidebar-section declaration-section">
+        <div class="sidebar-section-title">
+          <span>📜 我的生存宣言</span>
+        </div>
+        <div class="declaration-area">
+          <textarea id="declaration-input" placeholder="写下你读完本书后的生存宣言..." rows="3"></textarea>
+          <button class="declaration-save-btn" id="save-declaration">✍️ 立下宣言</button>
+        </div>
+        <div class="declaration-display" id="declaration-display" style="display:none"></div>
+      </div>
+
+    </aside>
+  </div>
+</div>
+
+<!-- ===== 移动端抽屉遮罩 ===== -->
+<div class="drawer-overlay" id="drawer-overlay"></div>
+
+<!-- ===== 结晶详情弹窗 ===== -->
+<div class="modal-overlay" id="orb-modal" style="display:none">
+  <div class="modal-card orb-modal-card">
+    <div class="modal-header">
+      <h3>💎 知识结晶详情</h3>
+      <button class="modal-close" id="orb-modal-close">✕</button>
+    </div>
+    <div class="modal-body" id="orb-modal-body"></div>
+  </div>
+</div>
+
+<!-- ===== 飞入动画结晶 ===== -->
+<div class="fly-orb" id="fly-orb">💎</div>
+
+<!-- ===== OpenClaw Agent 配置弹窗 ===== -->
+<div class="modal-overlay" id="openclaw-modal" style="display:none">
+  <div class="modal-card openclaw-modal-card">
+    <div class="modal-header">
+      <h3>⚙️ OpenClaw Agent 配置</h3>
+      <button class="modal-close" id="openclaw-modal-close">✕</button>
+    </div>
+    <div class="modal-body openclaw-modal-body">
+
+      <!-- 连接状态 -->
+      <div class="openclaw-status-bar">
+        <div class="status-item" id="status-agent-b">
+          <span class="status-dot dot-idle"></span>
+          <span>Agent B（书籍检索）</span>
+          <span class="status-label" id="status-b-label">未配置</span>
+        </div>
+        <div class="status-item" id="status-agent-c">
+          <span class="status-dot dot-idle"></span>
+          <span>Agent C（拆书导师）</span>
+          <span class="status-label" id="status-c-label">未配置</span>
+        </div>
+      </div>
+
+      <!-- Agent B 配置区 -->
+      <div class="openclaw-section">
+        <div class="openclaw-section-title">
+          <span class="section-icon">🔍</span>
+          <div>
+            <div class="section-name">Agent B · 书籍检索 Agent</div>
+            <div class="section-desc">负责在用户输入书名后，通过 OpenClaw 搜索引擎或语料库完成全书扫描与内容获取</div>
+          </div>
+        </div>
+        <div class="openclaw-fields">
+          <div class="field-group">
+            <label class="field-label">OpenClaw 服务地址</label>
+            <input type="text" class="field-input" id="agent-b-url" placeholder="https://your-openclaw-instance.com/api" />
+          </div>
+          <div class="field-group">
+            <label class="field-label">Agent B ID / Endpoint</label>
+            <input type="text" class="field-input" id="agent-b-id" placeholder="agent-book-retrieval 或完整 endpoint URL" />
+          </div>
+          <div class="field-group">
+            <label class="field-label">API Key</label>
+            <input type="password" class="field-input" id="agent-b-key" placeholder="sk-..." />
+          </div>
+          <div class="field-group">
+            <label class="field-label">检索模式</label>
+            <select class="field-select" id="agent-b-mode">
+              <option value="search">搜索引擎模式（联网检索书籍内容）</option>
+              <option value="corpus">语料库模式（使用本地语料）</option>
+              <option value="hybrid">混合模式（优先语料，缺失则联网）</option>
+            </select>
+          </div>
+          <button class="test-btn" id="test-agent-b">🔌 测试 Agent B 连接</button>
+          <div class="test-result" id="test-b-result"></div>
+        </div>
+      </div>
+
+      <!-- Agent C 配置区 -->
+      <div class="openclaw-section">
+        <div class="openclaw-section-title">
+          <span class="section-icon">🎓</span>
+          <div>
+            <div class="section-name">Agent C · 拆书导师 Agent</div>
+            <div class="section-desc">负责将书籍内容进行逻辑拆解、关卡生成、大白话转化和 2026 实时补丁注入</div>
+          </div>
+        </div>
+        <div class="openclaw-fields">
+          <div class="field-group">
+            <label class="field-label">OpenClaw 服务地址</label>
+            <input type="text" class="field-input" id="agent-c-url" placeholder="https://your-openclaw-instance.com/api" />
+          </div>
+          <div class="field-group">
+            <label class="field-label">Agent C ID / Endpoint</label>
+            <input type="text" class="field-input" id="agent-c-id" placeholder="agent-book-tutor 或完整 endpoint URL" />
+          </div>
+          <div class="field-group">
+            <label class="field-label">API Key</label>
+            <input type="password" class="field-input" id="agent-c-key" placeholder="sk-..." />
+          </div>
+          <div class="field-group">
+            <label class="field-label">拆书风格</label>
+            <select class="field-select" id="agent-c-style">
+              <option value="socratic">苏格拉底式（引导提问）</option>
+              <option value="storytelling">故事叙述式（沉浸叙事）</option>
+              <option value="debate">辩论式（多方观点碰撞）</option>
+              <option value="feynman">费曼技巧（极度简化）</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label class="field-label">关卡粒度</label>
+            <select class="field-select" id="agent-c-granularity">
+              <option value="chapter">按章节（推荐，每章一关）</option>
+              <option value="section">按小节（精细模式，每节一关）</option>
+              <option value="concept">按概念（概念驱动，每个核心概念一关）</option>
+            </select>
+          </div>
+          <button class="test-btn" id="test-agent-c">🔌 测试 Agent C 连接</button>
+          <div class="test-result" id="test-c-result"></div>
+        </div>
+      </div>
+
+      <!-- 全局设置 -->
+      <div class="openclaw-section">
+        <div class="openclaw-section-title">
+          <span class="section-icon">🌐</span>
+          <div>
+            <div class="section-name">全局设置</div>
+            <div class="section-desc">控制 Agent 调用行为和降级策略</div>
+          </div>
+        </div>
+        <div class="openclaw-fields">
+          <div class="field-group field-group-row">
+            <label class="field-label">启用 OpenClaw Agent</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="openclaw-enabled" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="field-group field-group-row">
+            <label class="field-label">降级到内置数据（Agent 不可用时）</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="openclaw-fallback" checked />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="field-group">
+            <label class="field-label">请求超时（秒）</label>
+            <input type="number" class="field-input field-input-sm" id="openclaw-timeout" value="30" min="5" max="120" />
+          </div>
+        </div>
+      </div>
+
+      <!-- 操作按钮 -->
+      <div class="openclaw-actions">
+        <button class="openclaw-save-btn" id="openclaw-save">💾 保存配置</button>
+        <button class="openclaw-reset-btn" id="openclaw-reset">🗑️ 清除配置</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script src="book-data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
